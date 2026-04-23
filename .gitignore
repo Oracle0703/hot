@@ -1,0 +1,49 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# Runtime data
+data/*
+!data/.gitkeep
+logs/
+outputs/
+
+# Browser/runtime caches
+playwright-browsers/
+
+# Build and release artifacts
+build/
+dist/
+release/
+.pyinstaller/
+*.zip
+
+# Cached installers and binary prerequisites
+packaging/prerequisites/*.exe
+
+# Local agent/tooling state
+.superpowers/
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/

@@ -1,0 +1,204 @@
+from __future__ import annotations
+
+from collections.abc import Callable
+from datetime import datetime
+import threading
+import time
+from urllib.parse import urlsplit
+from uuid import UUID
+
+from sqlalchemy import select
+from sqlalchemy.orm import sessionmaker
+
+from app.config import get_settings
+from app.models.job import CollectionJob
+from app.models.job_log import JobLog
+from app.models.source import Source
+from app.services.dingtalk_webhook_service import DingTalkWebhookService
+from app.services.report_distribution_service import ReportDistributionService
+from app.services.report_service import ReportService
+
+
+class JobRunner:
+    def __init__(
+        self,
+        session_factory: sessionmaker,
+        source_executor: Callable[[Source], dict[str, object]],
+        notification_scheduler: Callable[[Callable[[], None]], None] | None = None,
+        settings_provider: Callable[[], object] | None = None,
+        sleeper: Callable[[float], None] | None = None,
+    ) -> None:
+        self.session_factory = session_factory
+        self.source_executor = source_executor
+        self.notification_scheduler = notification_scheduler or self._schedule_notification_background
+        self.settings_provider = settings_provider or get_settings
+        self.sleeper = sleeper or time.sleep
+
+    def run_once(self) -> UUID | None:
+        with self.session_factory() as session:
+            job = session.scalar(
+                select(CollectionJob)
+                .where(CollectionJob.status == "pending")
+                .order_by(CollectionJob.id.asc())
+                .limit(1)
+            )
+            if job is None:
+                return None
+
+            enabled_sources = list(
+                session.scalars(
+                    select(Source)
+                    .where(Source.enabled.is_(True))
+                    .where(Source.source_group == job.source_group_scope if job.source_group_scope else True)
+                    .order_by(Source.id.asc())
+                ).all()
+            )
+            source_runs: list[dict[str, object]] = []
+
+            job.status = "running"
+            job.started_at = datetime.utcnow()
+            session.commit()
+
+            for index, source in enumerate(enabled_sources):
+                if index > 0:
+                    self._sleep_before_source(source)
+                job.current_source = source.name
+                session.commit()
+
+                try:
+                    result = self.source_executor(source)
+                    source_runs.append(
+                        {
+                            "source_id": source.id,
+                            "source_name": source.name,
+                            "item_count": result.get("item_count", 0),
+                            "items": result.get("items", []),
+                        }
+                    )
+                    job.completed_sources += 1
+                    job.success_sources += 1
+                except Exception as exc:  # noqa: BLE001
+                    job.completed_sources += 1
+                    job.failed_sources += 1
+                    session.add(
+                        JobLog(
+                            job_id=job.id,
+                            source_id=source.id,
+                            level="error",
+                            message=str(exc),
+                        )
+                    )
+                session.commit()
+
+            job.current_source = None
+            job.finished_at = datetime.utcnow()
+            if job.failed_sources > 0 and job.success_sources == 0:
+                job.status = "failed"
+            elif job.failed_sources > 0:
+                job.status = "partial_success"
+            else:
+                job.status = "success"
+
+            try:
+                report = ReportService(session).generate_for_job(job, source_runs)
+            except Exception as exc:  # noqa: BLE001
+                session.rollback()
+                job = session.get(CollectionJob, job.id)
+                if job is None:
+                    raise
+                job.current_source = None
+                job.finished_at = datetime.utcnow()
+                job.status = "failed"
+                session.add(
+                    JobLog(
+                        job_id=job.id,
+                        level="error",
+                        message=f"report generation failed: {exc}",
+                    )
+                )
+                session.commit()
+                raise
+
+            try:
+                ReportDistributionService().copy_report_to_share_dir(report)
+            except Exception as exc:  # noqa: BLE001
+                session.rollback()
+                job = session.get(CollectionJob, job.id)
+                if job is None:
+                    raise
+                session.add(
+                    JobLog(
+                        job_id=job.id,
+                        level="warning",
+                        message=f"report distribution failed: {exc}",
+                    )
+                )
+                session.commit()
+
+            self.notification_scheduler(lambda job_id=job.id: self._notify_job_summary(job_id))
+            return job.id
+
+    def _sleep_before_source(self, source: Source) -> None:
+        settings = self.settings_provider()
+        delay_seconds = float(max(int(getattr(settings, 'source_fetch_interval_seconds', 0) or 0), 0))
+        if self._is_bilibili_source(source):
+            delay_seconds += float(max(int(getattr(settings, 'bilibili_source_interval_seconds', 0) or 0), 0))
+        if delay_seconds > 0:
+            self.sleeper(delay_seconds)
+
+    def _is_bilibili_source(self, source: Source) -> bool:
+        host = urlsplit(str(getattr(source, 'entry_url', '') or '')).netloc.lower()
+        return host.endswith('bilibili.com')
+
+    def _schedule_notification_background(self, task: Callable[[], None]) -> None:
+        thread = threading.Thread(target=task, daemon=True)
+        thread.start()
+
+    def _notify_job_summary(self, job_id: UUID) -> None:
+        with self.session_factory() as session:
+            job = session.get(CollectionJob, job_id)
+            if job is None:
+                return
+
+            notifier = DingTalkWebhookService(session)
+            try:
+                notified = notifier.notify_job_summary(job)
+                if notified:
+                    for message in notifier.get_last_sent_messages():
+                        sequence = int(message.get('sequence', 0) or 0)
+                        total = int(message.get('total', 0) or 0)
+                        kind = str(message.get('kind', '') or '')
+                        label = str(message.get('label', '') or '')
+                        kind_text = 'summary' if kind == 'summary' else f"source {label}".strip()
+                        session.add(
+                            JobLog(
+                                job_id=job.id,
+                                level="info",
+                                message=f"dingtalk notification sent: {sequence}/{total} {kind_text}",
+                            )
+                        )
+                    session.commit()
+                else:
+                    skip_reason = notifier.get_skip_reason()
+                    if skip_reason:
+                        session.add(
+                            JobLog(
+                                job_id=job.id,
+                                level="warning",
+                                message=f"dingtalk notification skipped: {skip_reason}",
+                            )
+                        )
+                        session.commit()
+            except Exception as exc:  # noqa: BLE001
+                session.rollback()
+                job = session.get(CollectionJob, job_id)
+                if job is None:
+                    return
+                session.add(
+                    JobLog(
+                        job_id=job.id,
+                        level="warning",
+                        message=f"dingtalk notification failed: {exc}",
+                    )
+                )
+                session.commit()
