@@ -306,6 +306,70 @@ def test_report_service_updates_existing_item_instead_of_inserting_duplicate_for
         assert items[0].last_seen_job_id == second_job.id
 
 
+def test_report_service_persists_bilibili_stats_fields_and_updates_existing_item(tmp_path) -> None:
+    session_factory = setup_database(tmp_path, "report-service-bilibili-stats.db")
+
+    with session_factory() as session:
+        source = create_source(session, "B站UP", "https://space.bilibili.com/4186021")
+        first_job = JobService(session).create_manual_job()
+        second_job = JobService(session).create_manual_job()
+        service = ReportService(session)
+
+        service.generate_for_job(
+            first_job,
+            [
+                {
+                    "source_id": source.id,
+                    "source_name": source.name,
+                    "items": [
+                        {
+                            "title": "B站视频",
+                            "url": "https://www.bilibili.com/video/BV1z4oWB3Ex9",
+                            "published_at": "2026-04-22 11:57:57",
+                            "published_at_text": "2026-04-22 11:57:57",
+                            "cover_image_url": "https://i0.hdslb.com/demo-old.jpg",
+                            "like_count": 3689,
+                            "reply_count": 206,
+                            "view_count": 61317,
+                        }
+                    ],
+                }
+            ],
+        )
+        service.generate_for_job(
+            second_job,
+            [
+                {
+                    "source_id": source.id,
+                    "source_name": source.name,
+                    "items": [
+                        {
+                            "title": "B站视频",
+                            "url": "https://www.bilibili.com/video/BV1z4oWB3Ex9",
+                            "published_at": "2026-04-22 11:57:57",
+                            "published_at_text": "2026-04-22 11:58:59",
+                            "cover_image_url": "https://i0.hdslb.com/demo-new.jpg",
+                            "like_count": 4000,
+                            "reply_count": 230,
+                            "view_count": 70000,
+                        }
+                    ],
+                }
+            ],
+        )
+
+        items = list(session.scalars(select(CollectedItem)).all())
+
+        assert len(items) == 1
+        assert items[0].published_at_text == "2026-04-22 11:58:59"
+        assert items[0].cover_image_url == "https://i0.hdslb.com/demo-new.jpg"
+        assert items[0].like_count == 4000
+        assert items[0].reply_count == 230
+        assert items[0].view_count == 70000
+        assert items[0].first_seen_job_id == first_job.id
+        assert items[0].last_seen_job_id == second_job.id
+
+
 def test_report_service_preserves_date_only_published_at_without_midnight_display(tmp_path) -> None:
     session_factory = setup_database(tmp_path, "report-service-date-only.db")
 

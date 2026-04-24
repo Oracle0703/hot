@@ -36,6 +36,7 @@ def test_runtime_paths_ensure_directories_creates_required_folders(tmp_path) -> 
         env_file=tmp_path / "data" / "app.env",
         pid_file=tmp_path / "data" / "launcher.pid",
         launcher_log_file=tmp_path / "logs" / "launcher.log",
+        app_log_file=tmp_path / "logs" / "app.log",
     )
 
     paths.ensure_directories()

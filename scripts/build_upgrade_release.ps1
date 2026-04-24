@@ -74,3 +74,12 @@ if (-not $SkipBuild) {
 Invoke-Step -FilePath 'powershell.exe' -Arguments @('-ExecutionPolicy', 'Bypass', '-File', $PrepareScript, '-ReleaseRoot', $ReleaseRoot, '-DistRoot', $DistRoot) -DisplayCommand "powershell.exe -ExecutionPolicy Bypass -File scripts\prepare_upgrade_release.ps1 -ReleaseRoot $ReleaseRoot -DistRoot $DistRoot"
 
 New-ReleaseArchive -SourceDir $ReleaseDir -DestinationZip $ZipPath
+
+# Phase 4 / REQ-SEC-020: 升级包同样附 SHA256 校验。
+if (-not $DryRun) {
+    $sumsPath = "$ZipPath.sha256"
+    $hash = Get-FileHash -Path $ZipPath -Algorithm SHA256
+    $line = "{0}  {1}" -f $hash.Hash.ToLower(), (Split-Path -Leaf $ZipPath)
+    Set-Content -Path $sumsPath -Value $line -Encoding ASCII
+    Write-Host "生成校验文件: $sumsPath"
+}

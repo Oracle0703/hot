@@ -88,7 +88,7 @@ class _PlaywrightBilibiliRunner:
                 await context.add_cookies(cookies)
             page = await context.new_page()
             try:
-                await page.goto(search_url, wait_until="networkidle", timeout=45000)
+                await page.goto(search_url, wait_until="domcontentloaded", timeout=45000)
                 html = await page.content()
             finally:
                 await page.close()

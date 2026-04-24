@@ -69,6 +69,23 @@ class SourceService:
             statement = statement.where(Source.source_group == group)
         return len(list(self.session.scalars(statement).all()))
 
+    def count_enabled_sources_for_schedule_group(self, schedule_group: str) -> int:
+        statement = (
+            select(Source.id)
+            .where(Source.enabled.is_(True))
+            .where(Source.schedule_group == schedule_group)
+        )
+        return len(list(self.session.scalars(statement).all()))
+
+    def list_distinct_schedule_groups(self) -> list[str]:
+        statement = (
+            select(Source.schedule_group)
+            .where(Source.schedule_group.is_not(None))
+            .distinct()
+            .order_by(Source.schedule_group.asc())
+        )
+        return [value for value in self.session.scalars(statement).all() if value]
+
     def create_source(self, data: SourceCreate) -> Source:
         source = Source(**data.model_dump())
         self.session.add(source)

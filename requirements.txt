@@ -11,8 +11,12 @@ beautifulsoup4
 playwright
 apscheduler
 python-docx
+portalocker
+pywin32; platform_system == "Windows"
+cryptography
+pyyaml
 pytest
 pytest-asyncio
 pytest-playwright
+respx
 dingtalk-stream
-

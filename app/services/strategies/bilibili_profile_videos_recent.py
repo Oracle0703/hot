@@ -11,6 +11,7 @@ from bs4 import BeautifulSoup
 
 from app.config import get_settings
 from app.runtime_paths import get_runtime_paths
+from app.services.bilibili_video_detail_service import fetch_bilibili_video_detail_by_url
 from app.services.network_access_policy import launch_configured_chromium
 from app.services.strategies import run_awaitable_sync
 
@@ -47,9 +48,10 @@ _DEFAULT_RETRY_DELAY_SECONDS = 5.0
 
 
 class BilibiliProfileVideosRecentStrategy:
-    def __init__(self, runner=None, sleeper=None) -> None:
+    def __init__(self, runner=None, sleeper=None, detail_fetcher=None) -> None:
         self.runner = runner or _PlaywrightBilibiliProfileRunner()
         self.sleeper = sleeper or time.sleep
+        self.detail_fetcher = detail_fetcher or fetch_bilibili_video_detail_by_url
 
     def execute(self, source) -> list[dict[str, object]]:
         entry_url = str(getattr(source, "entry_url", "") or "").strip()
@@ -68,6 +70,7 @@ class BilibiliProfileVideosRecentStrategy:
             normalized = _normalize_item(raw_item)
             if normalized is None:
                 continue
+            normalized = self._enrich_item_with_detail(normalized)
             url = normalized["url"]
             if url in seen_urls:
                 continue
@@ -86,6 +89,17 @@ class BilibiliProfileVideosRecentStrategy:
             logger.warning("bilibili profile fetch retry once after retryable error: %s", exc)
             self.sleeper(_get_bilibili_retry_delay_seconds())
             return self.runner.fetch_items(source)
+
+    def _enrich_item_with_detail(self, item: dict[str, object]) -> dict[str, object]:
+        detail = self.detail_fetcher(str(item.get("url") or "").strip())
+        if not detail:
+            return item
+        enriched = dict(item)
+        for key in ("author", "published_at_text", "cover_image_url", "like_count", "reply_count", "view_count"):
+            value = detail.get(key)
+            if value is not None:
+                enriched[key] = value
+        return enriched
 
 
 class _PlaywrightBilibiliProfileRunner:
@@ -443,6 +457,10 @@ def _normalize_item(item: dict[str, object]) -> dict[str, object] | None:
     author = str(item.get("author") or "").strip()
     if author:
         normalized["author"] = author
+    for key in ("published_at_text", "cover_image_url", "like_count", "reply_count", "view_count"):
+        value = item.get(key)
+        if value is not None:
+            normalized[key] = value
     return normalized
 
 

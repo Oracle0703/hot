@@ -12,6 +12,7 @@ import httpx
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.services.bilibili_video_detail_service import fetch_bilibili_video_detail_by_url
 from app.config import Settings, get_settings
 from app.models.item import CollectedItem
 from app.models.job import CollectionJob
@@ -21,6 +22,17 @@ from app.services.published_at_display import format_published_at
 
 DEFAULT_TIMEOUT_SECONDS = 10.0
 DEFAULT_SEND_INTERVAL_SECONDS = 3.0
+
+
+def _truncate_seconds_in_text(value: object) -> object:
+    """如果文本含 yyyy-mm-dd HH:MM:SS 风格的秒分量，去掉 :SS。其它情况原样返回。"""
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return value
+    import re as _re
+    return _re.sub(r"(\d{1,2}:\d{2}):\d{2}(?=$|\s|[Z+\-])", r"\1", text)
 
 
 class DingTalkWebhookService:
@@ -37,6 +49,8 @@ class DingTalkWebhookService:
         self.sleeper = sleeper or time.sleep
         self._last_skip_reason: str | None = None
         self._last_sent_messages: list[dict[str, object]] = []
+        self._item_display_overrides: dict[str, dict[str, object]] = {}
+        self.detail_fetcher = fetch_bilibili_video_detail_by_url
 
     def notify_job_summary(self, job: CollectionJob) -> bool:
         self._last_skip_reason = None
@@ -108,13 +122,9 @@ class DingTalkWebhookService:
         return base64.b64encode(digest).decode('utf-8')
 
     def _build_title(self) -> str:
-        keyword = self.settings.dingtalk_keyword.strip()
-        if keyword:
-            return f"{keyword} 热点报告更新"
-        return '热点报告更新'
+        return '热点报告'
 
     def _build_payloads(self, job: CollectionJob) -> list[dict[str, object]]:
-        title = self._build_title()
         new_items = list(
             self.session.scalars(
                 select(CollectedItem)
@@ -134,13 +144,14 @@ class DingTalkWebhookService:
             new_items + missing_items,
             [log.source_id for log in failure_logs if log.source_id is not None],
         )
+        self._item_display_overrides = self._build_item_display_overrides(new_items)
         grouped_new_items = self._group_items_by_source(new_items, source_names)
         total_messages = len(grouped_new_items)
 
         return [
             self._build_markdown_payload(
-                self._build_message_title(title, index, total_messages, source_name),
-                self._build_source_markdown_text(job, title, source_name, items),
+                self._build_message_title(index, total_messages, source_name),
+                self._build_source_markdown_text(job, source_name, items),
                 {
                     'sequence': index,
                     'total': total_messages,
@@ -153,12 +164,14 @@ class DingTalkWebhookService:
 
     def _build_message_title(
         self,
-        base_title: str,
         sequence: int,
         total: int,
         label: str,
     ) -> str:
-        return f"{base_title} | {sequence}/{total} | {label}"
+        compact_label = self._compact_text(label)
+        if "热点报告" in compact_label:
+            return compact_label
+        return f"{self._build_title()} {compact_label}"
 
     def _build_markdown_payload(self, title: str, text: str, meta: dict[str, object]) -> dict[str, object]:
         return {
@@ -259,16 +272,12 @@ class DingTalkWebhookService:
     def _build_source_markdown_text(
         self,
         job: CollectionJob,
-        title: str,
         source_name: str,
         items: list[CollectedItem],
     ) -> str:
         lines = [
-            f"### {title}",
+            f"### {self._build_message_title(1, 1, source_name)}",
             '',
-            f"**采集源：** {source_name}",
-            '',
-            f"#### {source_name}新增 {len(items)} 条",
             *self._format_item_lines(items),
         ]
         return '\n'.join(lines)
@@ -314,13 +323,46 @@ class DingTalkWebhookService:
 
         lines: list[str] = []
         for index, item in enumerate(items, start=1):
-            title_text = self._compact_text(item.title)
-            if item.url:
-                lines.append(f"{index}. [{title_text}]({item.url})")
-            else:
-                lines.append(f"{index}. {title_text}")
-            lines.append(f"发布时间：{self._format_item_datetime(item.published_at, getattr(item, 'published_at_text', None))}")
+            title_text = self._build_item_title_line(item)
+            if lines:
+                lines.append("")
+            lines.append(f"{index}. {title_text}")
+            lines.append("")
+            lines.append(self._build_item_stats_line(item))
+            cover_line = self._build_item_cover_line(item)
+            if cover_line:
+                lines.append("")
+                lines.append(cover_line)
         return lines
+
+    def _build_item_title_line(self, item: CollectedItem) -> str:
+        title_text = self._compact_text(item.title)
+        url = self._optional_compact_text(item.url)
+        if not url:
+            return title_text
+        return f"[{title_text}]({url})"
+
+    def _build_item_stats_line(self, item: CollectedItem) -> str:
+        override = self._item_display_overrides.get(str(item.id), {})
+        line_parts = []
+        raw_text = override.get('published_at_text', getattr(item, 'published_at_text', None))
+        # 钉钉摘要正文统一截断到分钟级，避免在条目卡片里出现满 14 字节的 yyyy-MM-dd HH:MM:ss
+        line_parts.append(
+            f"发布时间：{self._format_item_datetime(item.published_at, _truncate_seconds_in_text(raw_text))}"
+        )
+        for label, key in (('点赞', 'like_count'), ('评论', 'reply_count'), ('播放', 'view_count')):
+            value = override.get(key)
+            if value is None:
+                continue
+            line_parts.append(f"{label}：{value}")
+        return " | ".join(line_parts)
+
+    def _build_item_cover_line(self, item: CollectedItem) -> str | None:
+        override = self._item_display_overrides.get(str(item.id), {})
+        cover_image_url = self._optional_compact_text(override.get("cover_image_url", getattr(item, "cover_image_url", None)))
+        if not cover_image_url:
+            return None
+        return f"封面图：{cover_image_url}"
 
     def _format_source_new_item_lines(
         self,
@@ -352,6 +394,34 @@ class DingTalkWebhookService:
 
     def _format_item_datetime(self, value: datetime | None, raw_text: object = None) -> str:
         return format_published_at(value, raw_text)
+
+    def _build_item_display_overrides(self, items: list[CollectedItem]) -> dict[str, dict[str, object]]:
+        overrides: dict[str, dict[str, object]] = {}
+        for item in items:
+            override = self._build_item_display_override(item)
+            if override:
+                overrides[str(item.id)] = override
+        return overrides
+
+    def _build_item_display_override(self, item: CollectedItem) -> dict[str, object]:
+        override = {
+            "published_at_text": getattr(item, "published_at_text", None),
+            "cover_image_url": getattr(item, "cover_image_url", None),
+            "like_count": getattr(item, "like_count", None),
+            "reply_count": getattr(item, "reply_count", None),
+            "view_count": getattr(item, "view_count", None),
+        }
+        if all(override.get(key) is not None for key in ("like_count", "reply_count", "view_count")):
+            return override
+
+        detail = self._fetch_bilibili_video_detail_by_url(self._optional_compact_text(item.url)) or {}
+        for key in ("author", "published_at_text", "cover_image_url", "like_count", "reply_count", "view_count"):
+            if override.get(key) is None and detail.get(key) is not None:
+                override[key] = detail[key]
+        return {key: value for key, value in override.items() if value is not None}
+
+    def _fetch_bilibili_video_detail_by_url(self, url: str | None) -> dict[str, object] | None:
+        return self.detail_fetcher(url)
 
     def _send_webhook(self, webhook: str, payload: dict[str, object], timeout_seconds: float, secret: str | None) -> None:
         request_payload = {key: value for key, value in payload.items() if key != '_meta'}

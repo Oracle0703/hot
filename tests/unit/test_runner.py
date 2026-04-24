@@ -17,6 +17,7 @@ from app.services.dingtalk_webhook_service import DingTalkWebhookService
 from app.services.job_service import JobService
 from app.services.report_distribution_service import ReportDistributionService
 from app.services.report_service import ReportService
+from app.services.weekly_cover_cache_service import WeeklyCoverCacheService
 from app.workers.runner import JobRunner
 
 
@@ -215,6 +216,36 @@ def test_runner_copies_report_to_share_dir_after_generation(tmp_path, monkeypatc
 
     assert copied["report"] is generated_report
 
+
+def test_runner_prunes_weekly_cover_cache_using_configured_retention_days(tmp_path, monkeypatch) -> None:
+    session_factory = setup_database(tmp_path, "runner-weekly-cover-prune.db")
+    with session_factory() as session:
+        session.add(Source(name="NGA", site_name="NGA", entry_url="https://example.com", fetch_mode="http", parser_type="generic_css", max_items=30, enabled=True))
+        session.commit()
+        JobService(session).create_manual_job()
+
+    prune_calls: list[int] = []
+
+    def fake_prune(self, *, now=None, max_age_days: int = 60) -> None:
+        prune_calls.append(max_age_days)
+
+    monkeypatch.setattr(WeeklyCoverCacheService, "prune", fake_prune)
+
+    runner = JobRunner(
+        session_factory=session_factory,
+        source_executor=lambda source: {"item_count": 1, "items": []},
+        notification_scheduler=lambda task: task(),
+        settings_provider=lambda: SimpleNamespace(
+            source_fetch_interval_seconds=0,
+            bilibili_source_interval_seconds=0,
+            weekly_cover_cache_retention_days=45,
+        ),
+    )
+
+    runner.run_once()
+
+    assert prune_calls == [45]
+
 def test_runner_logs_warning_when_dingtalk_notification_is_skipped(tmp_path, monkeypatch) -> None:
     session_factory = setup_database(tmp_path, 'runner-dingtalk-skipped.db')
     with session_factory() as session:
@@ -285,6 +316,49 @@ def test_runner_executes_only_sources_in_job_scope(tmp_path) -> None:
 
     assert processed_job_id == job_id
     assert executed_names == ["国内来源"]
+
+
+def test_runner_executes_only_sources_in_schedule_group_scope(tmp_path) -> None:
+    session_factory = setup_database(tmp_path, "runner-schedule-group-scope.db")
+    executed_names: list[str] = []
+    with session_factory() as session:
+        session.add(
+            Source(
+                name="早报来源",
+                site_name="Bilibili",
+                entry_url="https://example.com/morning",
+                fetch_mode="http",
+                parser_type="generic_css",
+                max_items=30,
+                enabled=True,
+                schedule_group="morning",
+            )
+        )
+        session.add(
+            Source(
+                name="晚报来源",
+                site_name="Bilibili",
+                entry_url="https://example.com/evening",
+                fetch_mode="http",
+                parser_type="generic_css",
+                max_items=30,
+                enabled=True,
+                schedule_group="evening",
+            )
+        )
+        session.commit()
+        job = JobService(session).create_manual_job_for_schedule_group("morning")
+        job_id = job.id
+
+    def record_executor(source: Source) -> dict[str, object]:
+        executed_names.append(source.name)
+        return {"item_count": 1, "items": []}
+
+    runner = JobRunner(session_factory=session_factory, source_executor=record_executor)
+    processed_job_id = runner.run_once()
+
+    assert processed_job_id == job_id
+    assert executed_names == ["早报来源"]
 
 
 def test_runner_waits_between_sources_using_global_and_bilibili_intervals(tmp_path) -> None:

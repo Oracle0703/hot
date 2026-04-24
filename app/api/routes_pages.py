@@ -14,6 +14,7 @@ from app.schemas.source import SourceUpdate
 from app.services.app_env_service import AppEnvService
 from app.services.bilibili_auth_service import BilibiliBrowserAuthService
 from app.services.job_service import JobService
+from app.services.schedule_plan_service import SchedulePlanService
 from app.services.scheduler_service import SchedulerService
 from app.services.source_service import SourceService
 from app.ui.page_theme import render_badge, render_page, render_page_header, render_panel, render_stat_card
@@ -30,6 +31,7 @@ NEW_SOURCE_TITLE = "\u65b0\u589e\u91c7\u96c6\u6e90"
 JOB_DETAIL_TITLE = "\u4efb\u52a1\u8be6\u60c5"
 RECENT_JOBS_TITLE = "\u6700\u8fd1\u4efb\u52a1"
 QUICK_ACTIONS_TITLE = "\u5feb\u6377\u5165\u53e3"
+SYSTEM_STATUS_TITLE = "\u7cfb\u7edf\u72b6\u6001"  # 系统状态
 TASK_PROGRESS_TITLE = "\u4efb\u52a1\u8fdb\u5ea6"
 TASK_LOGS_TITLE = "\u4efb\u52a1\u65e5\u5fd7"
 SETTINGS_TITLE = "\u8c03\u5ea6\u8bbe\u7f6e"
@@ -49,8 +51,8 @@ SCHEDULER_STATUS_VALUE = "\u5728\u7ebf"
 SCHEDULER_STATUS_META = "\u53ef\u8fdb\u5165\u8c03\u5ea6\u9875\u8c03\u6574\u6bcf\u65e5\u6267\u884c\u65f6\u95f4"
 CURRENT_STATUS_LABEL = "\u5f53\u524d\u72b6\u6001"
 CURRENT_STATUS_META = "\u5b9a\u65f6\u6267\u884c\u5f00\u5173"
-EXECUTION_TIME_LABEL = "\u6267\u884c\u65f6\u95f4"
-EXECUTION_TIME_META = "\u6bcf\u65e5\u81ea\u52a8\u8fd0\u884c\u65f6\u95f4"
+EXECUTION_TIME_LABEL = "\u517c\u5bb9\u65e7\u7248\u9ed8\u8ba4\u65f6\u95f4"
+EXECUTION_TIME_META = "\u4ec5\u7528\u4e8e\u65e7\u7248\u5355\u5b9a\u65f6\u914d\u7f6e\u8fc1\u79fb\uff1b\u5b9e\u9645\u8c03\u5ea6\u4ee5\u201c\u8c03\u5ea6\u8ba1\u5212\u201d\u5217\u8868\u4e3a\u51c6"
 SAVE_SETTINGS_LABEL = "\u4fdd\u5b58\u8bbe\u7f6e"
 SAVE_SOURCE_LABEL = "\u4fdd\u5b58\u91c7\u96c6\u6e90"
 RECENT_RESULT_TITLE = "\u6700\u8fd1\u4efb\u52a1\u7ed3\u679c"
@@ -68,7 +70,15 @@ def _source_group_label(group: str | None) -> str:
     return "未分组"
 
 
-def _job_scope_label(scope: str | None) -> str:
+def _schedule_group_label(group: str | None) -> str:
+    return group or "未参与定时任务"
+
+
+def _job_scope_label(job_or_scope) -> str:
+    schedule_group_scope = getattr(job_or_scope, "schedule_group_scope", None)
+    if schedule_group_scope:
+        return f"执行范围：调度分组 {schedule_group_scope}"
+    scope = getattr(job_or_scope, "source_group_scope", job_or_scope)
     if scope == "domestic":
         return "执行范围：国内"
     if scope == "overseas":
@@ -304,6 +314,7 @@ def _render_source_card(source) -> str:
     tone = "success" if source.enabled else "neutral"
     enabled_text = "\u5df2\u542f\u7528" if source.enabled else "\u5df2\u505c\u7528"
     group_text = _source_group_label(getattr(source, "source_group", None))
+    schedule_group_text = _schedule_group_label(getattr(source, "schedule_group", None))
     edit_link = _button_link('编辑', f'/sources/{source.id}')
     delete_form = f"""
     <form class='inline-form' method='post' action='/api/sources/{source.id}/delete' onsubmit=\"return confirm('确认删除这个采集员吗？');\">
@@ -315,6 +326,7 @@ def _render_source_card(source) -> str:
       <div class='kicker'>{escape(site_name)}</div>
       <h3><a href='/sources/{source.id}'>{escape(source.name)}</a></h3>
       <div>{render_badge(source.fetch_mode, 'info')} {render_badge(enabled_text, tone)} {render_badge(group_text, 'info')}</div>
+      <div class='resource-meta'>调度分组：{escape(schedule_group_text)}</div>
       <div class='resource-meta'>{escape(source.entry_url)}</div>
       <div class='page-actions'>{edit_link}{delete_form}</div>
     </article>
@@ -324,6 +336,7 @@ def _render_source_card(source) -> str:
 def _render_source_edit_page(source, *, error: str | None = None) -> str:
     checked = "checked" if getattr(source, "enabled", False) else ""
     group_value = str(getattr(source, "source_group", "") or "domestic")
+    schedule_group_value = str(getattr(source, "schedule_group", "") or "")
     search_keyword = str(getattr(source, "search_keyword", "") or "")
     error_html = f"<p class='helper-note'>{escape(error)}</p>" if error else ""
     form = f"""
@@ -348,6 +361,10 @@ def _render_source_edit_page(source, *, error: str | None = None) -> str:
             <option value='domestic'{" selected" if group_value == "domestic" else ""}>国内</option>
             <option value='overseas'{" selected" if group_value == "overseas" else ""}>国外</option>
           </select>
+        </label>
+        <label class='field'>
+          <span class='label'>调度分组</span>
+          <input name='schedule_group' value='{escape(schedule_group_value, quote=True)}' placeholder='如 morning / evening；留空则不参与定时任务' />
         </label>
         <label class='field'>
           <span class='label'>最大条数</span>
@@ -379,6 +396,20 @@ def _get_source_or_404(session: Session, source_id: str):
     if source is None:
         raise HTTPException(status_code=404, detail='source not found')
     return source
+
+
+def _render_schedule_group_run_actions(schedule_groups: list[str]) -> str:
+    if not schedule_groups:
+        return "<div class='helper-note'>按调度分组运行：当前还没有可用调度分组。</div>"
+    forms = [
+        (
+            f"<form class='inline-form' method='post' action='/jobs/run/schedule-group/{escape(group, quote=True)}'>"
+            f"{_button_submit(f'按调度分组运行 {group}')}"
+            "</form>"
+        )
+        for group in schedule_groups
+    ]
+    return "".join(forms)
 
 
 def _render_featured_latest_job(service: JobService, recent_jobs) -> str:
@@ -431,6 +462,32 @@ def _render_featured_latest_job(service: JobService, recent_jobs) -> str:
     """
 
 
+def _render_system_status_card(request: Request) -> str:
+    """REQ-OPS-002 / Task 8 — 在首页直接渲染系统健康卡片(无需前端 JS)。"""
+    try:
+        from app.api import routes_system as _rs
+        db_ok, db_reason = _rs._check_database()
+        scheduler = _rs._scheduler_state(request)
+        disk_free = _rs._disk_free_mb()
+        running_job_id = _rs._running_job_id()
+    except Exception as exc:  # pragma: no cover
+        return f"<p class='helper-note'>系统状态加载失败: {escape(str(exc))}</p>"
+
+    db_badge = "正常" if db_ok else f"异常 ({escape(db_reason or 'unknown')})"
+    sched_badge = "运行中" if scheduler.get("alive") else ("已启用未运行" if scheduler.get("enabled") else "未启用")
+    disk_badge = f"{disk_free} MB" if disk_free >= 0 else "未知"
+    running_badge = escape(running_job_id) if running_job_id else "无"
+
+    return (
+        "<div class='stats-grid compact-stats-grid'>"
+        f"{render_stat_card('数据库', db_badge, 'sqlite 连接探活')}"
+        f"{render_stat_card('调度线程', sched_badge, '后台任务派发')}"
+        f"{render_stat_card('数据盘可用', disk_badge, '低于 200MB 会告警')}"
+        f"{render_stat_card('当前运行任务', running_badge, '点击 /system/jobs/cancel-running 可取消')}"
+        "</div>"
+    )
+
+
 @router.get("/", response_class=HTMLResponse)
 def index_page(request: Request, session: Session = Depends(get_db_session)) -> str:
     service = JobService(session)
@@ -440,13 +497,17 @@ def index_page(request: Request, session: Session = Depends(get_db_session)) -> 
     domestic_count = source_service.count_enabled_sources("domestic")
     overseas_count = source_service.count_enabled_sources("overseas")
     ungrouped_count = source_service.count_enabled_sources(None)
+    schedule_groups = source_service.list_distinct_schedule_groups()
     latest_status = recent_jobs[0].status if recent_jobs else "idle"
     run_group_empty = request.query_params.get("run_group_empty")
+    run_schedule_group_empty = request.query_params.get("run_schedule_group_empty")
     run_group_feedback = ""
     if run_group_empty == "domestic":
         run_group_feedback = "<p class='helper-note'>国内分组没有可采集来源。</p>"
     elif run_group_empty == "overseas":
         run_group_feedback = "<p class='helper-note'>国外分组没有可采集来源。</p>"
+    elif run_schedule_group_empty:
+        run_group_feedback = f"<p class='helper-note'>调度分组 {escape(run_schedule_group_empty)} 没有可采集来源。</p>"
 
     hero = f"""
     <section class='page-hero dashboard-hero result-hero'>
@@ -472,6 +533,7 @@ def index_page(request: Request, session: Session = Depends(get_db_session)) -> 
             <form class='inline-form' method='post' action='/jobs/run/overseas'>
               {_button_submit('立即采集国外')}
             </form>
+            {_render_schedule_group_run_actions(schedule_groups)}
             {_button_link(SOURCES_TITLE, '/sources')}
             {_button_link(REPORTS_TITLE, '/reports')}
           </div>
@@ -484,11 +546,14 @@ def index_page(request: Request, session: Session = Depends(get_db_session)) -> 
         "<div id='quick-actions' class='quick-link-list'>"
         "<a class='mini-card' href='/sources'><h3>\u91c7\u96c6\u6e90\u7ba1\u7406</h3><div class='resource-meta'>\u67e5\u770b\u6765\u6e90\u914d\u7f6e\u3001\u542f\u7528\u72b6\u6001\u4e0e\u5165\u53e3 URL\u3002</div></a>"
         "<a class='mini-card' href='/reports'><h3>\u5386\u53f2\u62a5\u544a</h3><div class='resource-meta'>\u4e0b\u8f7d\u6700\u8fd1\u751f\u6210\u7684\u70ed\u70b9\u62a5\u544a\u3002</div></a>"
+        "<a class='mini-card' href='/weekly'><h3>\u6700\u8fd1\u4e00\u5468\u70ed\u70b9</h3><div class='resource-meta'>\u7528\u56fa\u5b9a\u8868\u683c\u9875\u67e5\u770b\u6700\u8fd1 7 \u5929\u7684\u91c7\u96c6\u7ed3\u679c\u3002</div></a>"
         "<a class='mini-card' href='/scheduler'><h3>\u5b9a\u65f6\u8c03\u5ea6</h3><div class='resource-meta'>\u8bbe\u7f6e\u6bcf\u65e5\u81ea\u52a8\u8fd0\u884c\u65f6\u95f4\u3002</div></a>"
+        "<a class='mini-card' href='/scheduler'><h3>\u6309\u8c03\u5ea6\u5206\u7ec4\u8fd0\u884c</h3><div class='resource-meta'>\u7ba1\u7406\u5206\u7ec4\u5e76\u6309\u65f6\u95f4\u70b9\u8fd0\u884c\u5bf9\u5e94\u6765\u6e90\u3002</div></a>"
         "</div>"
     )
     content = hero + f"""
     <section class='content-grid'>
+      {render_panel(SYSTEM_STATUS_TITLE, _render_system_status_card(request), extra_class='system-status-panel')}
       {render_panel(RECENT_JOBS_TITLE, _render_recent_jobs(recent_jobs), extra_class='recent-jobs-panel')}
       {render_panel(QUICK_ACTIONS_TITLE, quick_actions_html, extra_class='quick-actions-panel')}
     </section>
@@ -510,6 +575,7 @@ def _render_scheduler_page(
     bilibili_settings = app_env_service.get_bilibili_settings()
     network_settings = app_env_service.get_network_settings()
     fetch_interval_settings = app_env_service.get_fetch_interval_settings()
+    schedule_plans = SchedulePlanService(session).list_plans()
     enabled_text = "\u5df2\u542f\u7528" if settings.enabled else "\u5df2\u505c\u7528"
     checked = "checked" if settings.enabled else ""
     dingtalk_enabled_text = "\u5df2\u542f\u7528" if dingtalk_settings.enabled else "\u5df2\u505c\u7528"
@@ -527,10 +593,49 @@ def _render_scheduler_page(
     <div class='stats-grid'>
       {render_stat_card(CURRENT_STATUS_LABEL, enabled_text, CURRENT_STATUS_META)}
       {render_stat_card(EXECUTION_TIME_LABEL, settings.daily_time, EXECUTION_TIME_META)}
+      {render_stat_card('调度计划', str(len(schedule_plans)), '一条计划代表一个时间点绑定一个调度分组')}
       {render_stat_card('钉钉通知', dingtalk_enabled_text, '保存后会同步写入 data/app.env，并用于后续任务通知')}
       {render_stat_card('B站登录态', bilibili_cookie_status, '保存完整浏览器 Cookie 后，B站主页与站内搜索都会优先复用该登录态')}
       {render_stat_card('站点网络访问', network_enabled_text, '启用后可让 B站直连，其它站点按应用内代理规则访问')}
     </div>
+    """
+    if schedule_plans:
+        plan_rows = "".join(
+            (
+                "<tr>"
+                f"<td>{escape(plan.run_time)}</td>"
+                f"<td>{escape(plan.schedule_group)}</td>"
+                f"<td>{'已启用' if plan.enabled else '已停用'}</td>"
+                f"<td>{escape(str(plan.last_triggered_on) if plan.last_triggered_on else '未触发')}</td>"
+                "</tr>"
+            )
+            for plan in schedule_plans
+        )
+        plan_list_html = (
+            "<table class='data-table'><thead><tr><th>执行时间</th><th>调度分组</th><th>状态</th><th>最近触发</th></tr></thead>"
+            f"<tbody>{plan_rows}</tbody></table>"
+        )
+    else:
+        plan_list_html = "<div class='empty-state'>暂无调度计划，先新增一条 run_time + schedule_group 规则。</div>"
+    plan_form = """
+    <form method='post' action='/scheduler/plans' class='scheduler-form scheduler-settings-panel'>
+      <label class='checkbox-row'>
+        <input type='checkbox' name='enabled' value='true' checked />
+        <span>启用该调度计划</span>
+      </label>
+      <div class='field-grid'>
+        <div class='field'>
+          <span class='label'>执行时间</span>
+          <input type='time' name='run_time' value='08:00' />
+        </div>
+        <div class='field'>
+          <span class='label'>调度分组</span>
+          <input name='schedule_group' placeholder='例如 morning / evening' />
+        </div>
+      </div>
+      <p class='helper-note'>未分组来源不会参与任何定时任务；同一个调度分组可以挂多个时间点。</p>
+      <div class='page-actions'><button class='button-primary' type='submit'>新增调度计划</button></div>
+    </form>
     """
     form = f"""
     <form method='post' action='/scheduler' class='scheduler-form scheduler-settings-panel'>
@@ -539,9 +644,10 @@ def _render_scheduler_page(
         <span>\u542f\u7528\u5b9a\u65f6\u8c03\u5ea6</span>
       </label>
       <div class='field'>
-        <span class='label'>\u6267\u884c\u65f6\u95f4</span>
+        <span class='label'>\u517c\u5bb9\u65e7\u7248\u9ed8\u8ba4\u65f6\u95f4</span>
         <input type='time' name='daily_time' value='{escape(settings.daily_time, quote=True)}' />
       </div>
+      <p class='helper-note'>\u5b9e\u9645\u8c03\u5ea6\u4ee5\u201c\u8c03\u5ea6\u8ba1\u5212\u201d\u5217\u8868\u4e3a\u51c6\uff1b\u8fd9\u91cc\u53ea\u4fdd\u7559\u65e7\u7248\u5355\u5b9a\u65f6\u517c\u5bb9\u4fe1\u606f\u3002</p>
       <div class='page-actions'>{_button_submit(SAVE_SETTINGS_LABEL)}</div>
     </form>
     """
@@ -629,6 +735,7 @@ def _render_scheduler_page(
         )
         + summary
         + render_panel(SETTINGS_TITLE, form, extra_class='scheduler-settings-panel')
+        + render_panel('调度计划', plan_list_html + plan_form, extra_class='scheduler-settings-panel')
         + render_panel('钉钉通知', dingtalk_form, extra_class='scheduler-settings-panel')
         + render_panel('B站登录态', bilibili_form, extra_class='scheduler-settings-panel')
         + render_panel('站点网络访问', network_form, extra_class='scheduler-settings-panel')
@@ -653,6 +760,21 @@ async def save_scheduler_settings(request: Request, session: Session = Depends(g
     enabled = form_data.get('enabled', [None])[0] == 'true'
     daily_time = form_data.get('daily_time', ['08:00'])[0]
     SchedulerService(session).update_settings(enabled=enabled, daily_time=daily_time)
+    return RedirectResponse(url='/scheduler', status_code=303)
+
+
+@router.post('/scheduler/plans')
+async def create_schedule_plan(request: Request, session: Session = Depends(get_db_session)) -> RedirectResponse:
+    form_data = parse_qs((await request.body()).decode('utf-8'))
+    enabled = form_data.get('enabled', [None])[0] == 'true'
+    run_time = form_data.get('run_time', ['08:00'])[0].strip() or '08:00'
+    schedule_group = form_data.get('schedule_group', [''])[0].strip()
+    if schedule_group:
+        SchedulePlanService(session).create_plan(
+            enabled=enabled,
+            run_time=run_time,
+            schedule_group=schedule_group,
+        )
     return RedirectResponse(url='/scheduler', status_code=303)
 
 
@@ -779,6 +901,10 @@ def new_source_page() -> str:
           </select>
         </label>
         <label class='field'>
+          <span class='label'>调度分组</span>
+          <input name='schedule_group' placeholder='例如：morning；留空则不参与定时任务' />
+        </label>
+        <label class='field'>
           <span class='label'>\u6700\u5927\u6761\u6570</span>
           <input name='max_items' value='30' />
         </label>
@@ -816,6 +942,7 @@ async def save_source_page(source_id: str, request: Request, session: Session = 
             entry_url=form_data.get('entry_url', [str(source.entry_url)])[0].strip(),
             search_keyword=(form_data.get('search_keyword', [''])[0].strip() or None),
             source_group=form_data.get('source_group', [str(getattr(source, 'source_group', '') or '')])[0].strip() or None,
+            schedule_group=form_data.get('schedule_group', [str(getattr(source, 'schedule_group', '') or '')])[0].strip() or None,
             max_items=form_data.get('max_items', [str(source.max_items)])[0].strip(),
             enabled=form_data.get('enabled', [None])[0] == 'true',
         )
@@ -825,6 +952,7 @@ async def save_source_page(source_id: str, request: Request, session: Session = 
         source.entry_url = form_data.get('entry_url', [str(source.entry_url)])[0]
         source.search_keyword = form_data.get('search_keyword', [''])[0] or None
         source.source_group = form_data.get('source_group', [str(getattr(source, 'source_group', '') or '')])[0] or None
+        source.schedule_group = form_data.get('schedule_group', [str(getattr(source, 'schedule_group', '') or '')])[0] or None
         source.max_items = form_data.get('max_items', [str(source.max_items)])[0]
         source.enabled = form_data.get('enabled', [None])[0] == 'true'
         return HTMLResponse(content=_render_source_edit_page(source, error=message), status_code=422)
@@ -863,6 +991,20 @@ def run_overseas_job(session: Session = Depends(get_db_session), dispatcher=Depe
     return RedirectResponse(url=f'/jobs/{job.id}', status_code=303)
 
 
+@router.post('/jobs/run/schedule-group/{schedule_group}')
+def run_schedule_group_job(
+    schedule_group: str,
+    session: Session = Depends(get_db_session),
+    dispatcher=Depends(get_job_dispatcher),
+) -> RedirectResponse:
+    service = JobService(session)
+    job = service.create_manual_job_for_schedule_group(schedule_group)
+    if job is None:
+        return RedirectResponse(url=f'/?run_schedule_group_empty={schedule_group}', status_code=303)
+    dispatcher.dispatch_pending_jobs()
+    return RedirectResponse(url=f'/jobs/{job.id}', status_code=303)
+
+
 @router.get('/jobs/{job_id}', response_class=HTMLResponse)
 def job_detail_page(job_id: str, session: Session = Depends(get_db_session)) -> str:
     service = JobService(session)
@@ -874,7 +1016,7 @@ def job_detail_page(job_id: str, session: Session = Depends(get_db_session)) -> 
         eyebrow='Job Monitor',
         title=JOB_DETAIL_TITLE,
         subtitle='\u6301\u7eed\u8ddf\u8e2a\u5f53\u524d\u4efb\u52a1\u72b6\u6001\u3001\u6765\u6e90\u5b8c\u6210\u60c5\u51b5\u548c\u62a5\u544a\u751f\u6210\u8fdb\u5ea6\u3002',
-        actions=_button_link('\u8fd4\u56de\u9996\u9875', '/') + render_badge(_job_scope_label(job.source_group_scope), 'info') + render_badge(job.status, _job_status_tone(job.status)),
+        actions=_button_link('\u8fd4\u56de\u9996\u9875', '/') + render_badge(_job_scope_label(job), 'info') + render_badge(job.status, _job_status_tone(job.status)),
     )
     logs = service.list_job_logs(job_id)
     progress_host = f"<div id='progress-host' data-url='/jobs/{job.id}/progress'>{render_progress_panel(job, service.get_report_id(job_id), service.get_latest_error_message(job_id), logs)}</div>"
@@ -929,6 +1071,147 @@ def job_logs_partial(job_id: str, session: Session = Depends(get_db_session)) ->
     if service.get_job(job_id) is None:
         raise HTTPException(status_code=404, detail='job not found')
     return render_log_list(service.list_job_logs(job_id))
+
+
+# ---------------------------------------------------------------------------
+# 配置中心 (REQ-CFG-010 / TC-API-101~103)
+# ---------------------------------------------------------------------------
+import os as _os
+
+from app.config_schema import (
+    SettingsSchema as _SettingsSchema,
+    ValidationError as _SchemaValidationError,
+    list_settings_groups as _list_settings_groups,
+    mask_value as _mask_value,
+)
+
+
+def _read_current_env_values() -> dict[str, str]:
+    """读取 data/app.env 当前持久化值(不含 os.environ 透传)。"""
+    service = AppEnvService()
+    env_path = service.env_file
+    values: dict[str, str] = {}
+    if env_path.exists():
+        for line in env_path.read_text(encoding='utf-8-sig').splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith('#') or '=' not in stripped:
+                continue
+            k, v = stripped.split('=', 1)
+            values[k.strip()] = v.strip()
+    return values
+
+
+def _render_config_center_page(error: str | None = None, saved_keys: list[str] | None = None, field_errors: dict[str, str] | None = None) -> str:
+    saved_keys = saved_keys or []
+    field_errors = field_errors or {}
+    current = _read_current_env_values()
+
+    sections: list[str] = []
+    for group, infos in _list_settings_groups().items():
+        rows: list[str] = []
+        for info in infos:
+            raw = current.get(info.env_var, _os.getenv(info.env_var, str(info.default if info.default is not None else '')))
+            display = _mask_value(raw, sensitive=True) if info.sensitive else escape(str(raw))
+            field_err_html = ''
+            if info.env_var in field_errors:
+                field_err_html = f'<div class="field-error">{escape(field_errors[info.env_var])}</div>'
+            rows.append(
+                f'''
+<tr data-env="{info.env_var}">
+  <th><code>{info.env_var}</code></th>
+  <td>
+    <input type="text" name="{info.env_var}" value="{escape(raw if not info.sensitive else "")}"
+           placeholder="{escape(display)}" />
+    {field_err_html}
+  </td>
+  <td><span class="hint">{escape(info.description or '')}</span></td>
+</tr>
+                '''
+            )
+        sections.append(
+            render_panel(
+                title=f'{group}',
+                content=f'<table class="config-table"><tbody>{"".join(rows)}</tbody></table>',
+            )
+        )
+
+    saved_html = ''
+    if saved_keys:
+        saved_html = f'<div class="banner banner-success">已保存:{", ".join(escape(k) for k in saved_keys)}</div>'
+    error_html = f'<div class="banner banner-error">{escape(error)}</div>' if error else ''
+
+    body = f'''
+{render_page_header(eyebrow='运维', title='配置中心', subtitle='REQ-CFG-010 — 集中查看与修改全部环境变量(敏感字段以掩码显示)')}
+{saved_html}
+{error_html}
+<form method="post" action="/config" class="config-center-form">
+  {''.join(sections)}
+  <div class="actions"><button type="submit" class="primary">保存全部</button></div>
+</form>
+'''
+    return render_page(title='配置中心', content=body, body_class='theme-dark')
+
+
+@router.get('/config', response_class=HTMLResponse)
+def config_center_page() -> str:
+    """TC-API-101: 配置中心页,渲染所有分组。"""
+    return _render_config_center_page()
+
+
+@router.post('/config')
+async def save_config_center(request: Request) -> Response:
+    """TC-API-102 / TC-API-103: 保存合法值持久化;非法值 422 + 行级错误。"""
+    form_data = parse_qs((await request.body()).decode('utf-8'))
+    submitted: dict[str, str] = {k: v[0] for k, v in form_data.items() if v}
+
+    try:
+        # 用 schema 重新构造一次以校验所有提交字段
+        merged_env = {**_read_current_env_values(), **submitted}
+        # 仅传入 schema 已声明的 alias 字段
+        known_aliases = {f.alias for f in _SettingsSchema.model_fields.values() if f.alias}
+        validation_kwargs = {k: v for k, v in merged_env.items() if k in known_aliases}
+        _SettingsSchema(**validation_kwargs)
+    except _SchemaValidationError as exc:
+        field_errors: dict[str, str] = {}
+        for err in exc.errors():
+            loc = err.get('loc', ())
+            if loc:
+                field_name = str(loc[0])
+                # 找到对应 alias
+                field = _SettingsSchema.model_fields.get(field_name)
+                env_var = (field.alias if field else None) or field_name.upper()
+                field_errors[env_var] = err.get('msg', 'invalid')
+        html = _render_config_center_page(
+            error='保存失败:存在非法字段,请修正后重试',
+            field_errors=field_errors,
+        )
+        return HTMLResponse(content=html, status_code=422)
+
+    # 校验通过 — 写入 app.env(只持久化用户实际修改过、且非敏感空白的字段)
+    service = AppEnvService()
+    saved_keys: list[str] = []
+    write_payload: dict[str, str] = {}
+    for env_var, value in submitted.items():
+        if env_var not in {f.alias for f in _SettingsSchema.model_fields.values() if f.alias}:
+            continue
+        # 敏感字段:留空表示"保留原值"
+        info_by_alias = {(f.alias or n.upper()): (n, f) for n, f in _SettingsSchema.model_fields.items()}
+        _, field = info_by_alias[env_var]
+        meta = field.json_schema_extra if isinstance(field.json_schema_extra, dict) else {}
+        if meta.get('sensitive') and not value.strip():
+            continue
+        write_payload[env_var] = value
+        saved_keys.append(env_var)
+
+    if write_payload:
+        # AppEnvService 内部已经走 portalocker + 原子替换
+        service._write_values({**_read_current_env_values(), **write_payload})  # noqa: SLF001 — 内部 API 复用
+
+    return HTMLResponse(
+        content=_render_config_center_page(saved_keys=saved_keys),
+        status_code=200,
+    )
+
 
 
 

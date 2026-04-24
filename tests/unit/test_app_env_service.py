@@ -206,3 +206,41 @@ def test_app_env_service_reads_fetch_interval_settings_from_env_file(tmp_path, m
     assert settings.source_fetch_interval_seconds == 5
     assert settings.bilibili_source_interval_seconds == 15
     assert settings.bilibili_retry_delay_seconds == 9
+
+
+def test_app_env_service_concurrent_writes_do_not_corrupt_file(tmp_path, monkeypatch) -> None:
+    """TC-CFG-101: 多线程并发 update_dingtalk_settings 不会因竞争丢字段或截断文件"""
+    import threading
+
+    env_file = tmp_path / 'data' / 'app.env'
+    monkeypatch.delenv('DINGTALK_WEBHOOK', raising=False)
+
+    errors: list[BaseException] = []
+
+    def write(label: str) -> None:
+        try:
+            AppEnvService(env_file=env_file).update_dingtalk_settings(
+                enabled=True,
+                webhook=f'https://example.com/{label}',
+                secret=f'SEC{label}',
+                keyword=label,
+            )
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=write, args=(f't{i}',)) for i in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=15)
+
+    assert not errors, f'concurrent writes raised: {errors}'
+    text = env_file.read_text(encoding='utf-8')
+    # 文件至少含期望的 key,且最终值是某次 write 的内容
+    assert 'ENABLE_DINGTALK_NOTIFIER=true' in text
+    assert 'DINGTALK_WEBHOOK=https://example.com/t' in text
+    assert 'DINGTALK_KEYWORD=t' in text
+    # 不存在残留的 .tmp
+    leftover = list(env_file.parent.glob('app.env.*.tmp'))
+    assert leftover == []
+

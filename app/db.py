@@ -29,12 +29,14 @@ _SQLITE_LEGACY_SOURCE_COLUMN_PATCHES: tuple[tuple[str, str], ...] = (
         "ALTER TABLE sources ADD COLUMN collection_strategy VARCHAR(50) NOT NULL DEFAULT 'generic_css'",
     ),
     ("source_group", "ALTER TABLE sources ADD COLUMN source_group VARCHAR(20)"),
+    ("schedule_group", "ALTER TABLE sources ADD COLUMN schedule_group VARCHAR(100)"),
     ("search_keyword", "ALTER TABLE sources ADD COLUMN search_keyword VARCHAR(200)"),
 )
 
 
 _SQLITE_LEGACY_COLLECTION_JOB_COLUMN_PATCHES: tuple[tuple[str, str], ...] = (
     ("source_group_scope", "ALTER TABLE collection_jobs ADD COLUMN source_group_scope VARCHAR(20)"),
+    ("schedule_group_scope", "ALTER TABLE collection_jobs ADD COLUMN schedule_group_scope VARCHAR(100)"),
 )
 
 
@@ -45,6 +47,14 @@ _SQLITE_LEGACY_COLLECTED_ITEM_COLUMN_PATCHES: tuple[tuple[str, str], ...] = (
     ("first_seen_at", "ALTER TABLE collected_items ADD COLUMN first_seen_at DATETIME"),
     ("last_seen_at", "ALTER TABLE collected_items ADD COLUMN last_seen_at DATETIME"),
     ("published_at_text", "ALTER TABLE collected_items ADD COLUMN published_at_text VARCHAR(100)"),
+    ("cover_image_url", "ALTER TABLE collected_items ADD COLUMN cover_image_url TEXT"),
+    ("like_count", "ALTER TABLE collected_items ADD COLUMN like_count INTEGER"),
+    ("reply_count", "ALTER TABLE collected_items ADD COLUMN reply_count INTEGER"),
+    ("view_count", "ALTER TABLE collected_items ADD COLUMN view_count INTEGER"),
+    ("recommended_grade", "ALTER TABLE collected_items ADD COLUMN recommended_grade VARCHAR(10)"),
+    ("manual_grade", "ALTER TABLE collected_items ADD COLUMN manual_grade VARCHAR(10)"),
+    ("pushed_to_dingtalk_at", "ALTER TABLE collected_items ADD COLUMN pushed_to_dingtalk_at DATETIME"),
+    ("pushed_to_dingtalk_batch_id", "ALTER TABLE collected_items ADD COLUMN pushed_to_dingtalk_batch_id VARCHAR(64)"),
     ("image_urls", "ALTER TABLE collected_items ADD COLUMN image_urls JSON NOT NULL DEFAULT '[]'"),
 )
 

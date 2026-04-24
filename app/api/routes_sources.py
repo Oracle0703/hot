@@ -103,6 +103,7 @@ def _build_form_payload(form_data: dict[str, list[str]]) -> SourceCreate:
     fetch_mode = _normalize_optional_text(_get_form_value(form_data, "fetch_mode"))
     parser_type = _normalize_optional_text(_get_form_value(form_data, "parser_type"))
     source_group = _normalize_optional_text(_get_form_value(form_data, "source_group"))
+    schedule_group = _normalize_optional_text(_get_form_value(form_data, "schedule_group"))
 
     if not source_group:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="source_group is required")
@@ -143,6 +144,7 @@ def _build_form_payload(form_data: dict[str, list[str]]) -> SourceCreate:
             max_items=(30 if max_items_raw == "" else max_items_raw),
             enabled=True,
             source_group=source_group,
+            schedule_group=schedule_group,
             collection_strategy=strategy,
             search_keyword=search_keyword,
         )
@@ -207,5 +209,59 @@ async def create_source_from_form(request: Request, session: Session = Depends(g
     response = Response(status_code=status.HTTP_303_SEE_OTHER)
     response.headers["Location"] = "/sources"
     return response
+
+
+# --- 试抓接口 (REQ-STRAT-002 / TC-API-201~202) ---------------------------------
+import httpx as _httpx
+
+from app.services.dry_run_service import DryRunService as _DryRunService
+
+
+def _default_html_fetcher(source) -> str:
+    """生产路径:用 httpx 同步 GET 拉一次 HTML(失败时抛 HTTPException 由上层包成 502)。"""
+    url = getattr(source, "entry_url", None) or ""
+    if url.startswith("file://"):
+        from urllib.parse import urlparse, unquote
+        parsed = urlparse(url)
+        path = unquote(parsed.path)
+        # Windows: file:///C:/... -> /C:/... 需去掉首个 /
+        if re.match(r"^/[A-Za-z]:/", path):
+            path = path[1:]
+        with open(path, "r", encoding="utf-8") as fh:
+            return fh.read()
+    if not url.startswith(("http://", "https://")):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid entry_url")
+    try:
+        with _httpx.Client(timeout=10.0, follow_redirects=True) as client:
+            resp = client.get(url)
+            resp.raise_for_status()
+            return resp.text
+    except _httpx.HTTPError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"fetch failed: {exc}")
+
+
+@router.post("/dry-run")
+async def dry_run_unsaved_source(request: Request) -> dict:
+    """TC-API-201 — 对未保存的临时配置试抓。请求体复用 SourceCreate 的字段。"""
+    body = await request.json()
+    try:
+        candidate = SourceCreate.model_validate(body)
+    except ValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=exc.errors())
+    service = _DryRunService(fetcher=_default_html_fetcher)
+    result = service.dry_run(candidate)
+    return {"items": result.items, "diagnostics": result.diagnostics}
+
+
+@router.post("/{source_id}/dry-run")
+def dry_run_saved_source(source_id: str, session: Session = Depends(get_db_session)) -> dict:
+    """TC-API-202"""
+    service = SourceService(session)
+    source = service.get_source(source_id)
+    if source is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="source not found")
+    dry = _DryRunService(fetcher=_default_html_fetcher)
+    result = dry.dry_run(source)
+    return {"items": result.items, "diagnostics": result.diagnostics}
 
 

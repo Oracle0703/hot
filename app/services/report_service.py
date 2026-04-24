@@ -7,6 +7,7 @@ from urllib.parse import urlsplit
 from uuid import UUID
 
 import httpx
+import portalocker
 from docx import Document
 from docx.shared import Inches
 from sqlalchemy import select
@@ -89,8 +90,12 @@ class ReportService:
                     select(CollectedItem).where(CollectedItem.normalized_hash == normalized_hash)
                 )
                 published_at = self._parse_published_at(item.get("published_at"))
-                published_at_text = self._string_or_none(item.get("published_at"))
+                published_at_text = self._string_or_none(item.get("published_at_text")) or self._string_or_none(item.get("published_at"))
                 image_urls = self._normalize_image_urls(item.get("image_urls"))
+                cover_image_url = self._string_or_none(item.get("cover_image_url"))
+                like_count = self._int_or_none(item.get("like_count"))
+                reply_count = self._int_or_none(item.get("reply_count"))
+                view_count = self._int_or_none(item.get("view_count"))
                 if collected_item is None:
                     collected_item = CollectedItem(
                         source_id=source_id,
@@ -105,6 +110,10 @@ class ReportService:
                         first_seen_at=seen_at,
                         last_seen_at=seen_at,
                         heat_score=self._string_or_none(item.get("heat_score")),
+                        cover_image_url=cover_image_url,
+                        like_count=like_count,
+                        reply_count=reply_count,
+                        view_count=view_count,
                         excerpt=self._string_or_none(item.get("excerpt")),
                         image_urls=image_urls,
                         normalized_hash=normalized_hash,
@@ -122,6 +131,10 @@ class ReportService:
                 collected_item.published_at = published_at or collected_item.published_at
                 collected_item.published_at_text = published_at_text or collected_item.published_at_text
                 collected_item.heat_score = self._string_or_none(item.get("heat_score")) or collected_item.heat_score
+                collected_item.cover_image_url = cover_image_url or collected_item.cover_image_url
+                collected_item.like_count = like_count if like_count is not None else collected_item.like_count
+                collected_item.reply_count = reply_count if reply_count is not None else collected_item.reply_count
+                collected_item.view_count = view_count if view_count is not None else collected_item.view_count
                 collected_item.excerpt = self._string_or_none(item.get("excerpt")) or collected_item.excerpt
                 if image_urls:
                     collected_item.image_urls = image_urls
@@ -282,6 +295,14 @@ class ReportService:
                 normalized.append(text)
         return normalized
 
+    def _int_or_none(self, value: object) -> int | None:
+        try:
+            if value is None or str(value).strip() == "":
+                return None
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
     def _build_temp_report_path(self, target_path: Path, job: CollectionJob, label: str) -> Path:
         return target_path.with_name(f".{target_path.name}.{job.id}.{label}.tmp")
 
@@ -305,8 +326,12 @@ class ReportService:
         docx_temp_path: Path,
         backup_paths: dict[Path, Path],
     ) -> None:
-        self._replace_report_file(markdown_path, markdown_temp_path, backup_paths[markdown_path])
-        self._replace_report_file(docx_path, docx_temp_path, backup_paths[docx_path])
+        # TC-RPT-001: 跨进程/线程互斥，避免两个 writer 同时调度 .bak 与 .replace 导致中间态破坏。
+        lock_path = markdown_path.with_name('.hot-report.lock')
+        markdown_path.parent.mkdir(parents=True, exist_ok=True)
+        with portalocker.Lock(str(lock_path), 'w', timeout=30):
+            self._replace_report_file(markdown_path, markdown_temp_path, backup_paths[markdown_path])
+            self._replace_report_file(docx_path, docx_temp_path, backup_paths[docx_path])
 
     def _replace_report_file(self, target_path: Path, temp_path: Path, backup_path: Path) -> None:
         backup_path.unlink(missing_ok=True)

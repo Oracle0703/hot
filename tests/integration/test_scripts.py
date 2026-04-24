@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -197,7 +198,7 @@ def test_build_offline_release_script_prefers_tar_archive() -> None:
 def test_launcher_dry_run_prints_local_runtime_summary(tmp_path) -> None:
     result = subprocess.run(
         [
-            "python",
+            sys.executable,
             str(LAUNCHER),
             "--dry-run",
             "--runtime-root",

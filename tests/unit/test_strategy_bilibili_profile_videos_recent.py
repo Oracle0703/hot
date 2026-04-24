@@ -63,6 +63,30 @@ def test_bilibili_profile_strategy_deduplicates_and_limits_items() -> None:
     ]
 
 
+def test_bilibili_profile_strategy_enriches_items_with_bilibili_stats() -> None:
+    runner = _FakeBilibiliProfileRunner(
+        [
+            {"title": "视频1", "url": "https://www.bilibili.com/video/BV1STAT", "published_at": "2026-04-22"},
+        ]
+    )
+    strategy = BilibiliProfileVideosRecentStrategy(
+        runner=runner,
+        detail_fetcher=lambda url: {
+            "like_count": 3689,
+            "reply_count": 206,
+            "view_count": 61317,
+            "cover_image_url": "https://i0.hdslb.com/demo.jpg",
+        },
+    )
+
+    items = strategy.execute(SimpleNamespace(entry_url="https://space.bilibili.com/20411266", max_items=1))
+
+    assert items[0]["like_count"] == 3689
+    assert items[0]["reply_count"] == 206
+    assert items[0]["view_count"] == 61317
+    assert items[0]["cover_image_url"] == "https://i0.hdslb.com/demo.jpg"
+
+
 def test_bilibili_profile_strategy_retries_once_when_redirect_or_risk_control_is_retryable(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv('BILIBILI_RETRY_DELAY_SECONDS', raising=False)
 

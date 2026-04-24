@@ -19,6 +19,8 @@ def format_published_at(value: datetime | None, raw_text: object) -> str:
             return normalized_text
         if _looks_like_date_only_text(normalized_text):
             return parsed_text.strftime("%Y-%m-%d")
+        if _looks_like_explicit_seconds_text(normalized_text):
+            return parsed_text.strftime("%Y-%m-%d %H:%M:%S")
         if _looks_like_explicit_time_text(normalized_text):
             return parsed_text.strftime("%Y-%m-%d %H:%M")
         return normalized_text
@@ -58,6 +60,10 @@ def _looks_like_date_only_text(text: str) -> bool:
 
 def _looks_like_explicit_time_text(text: str) -> bool:
     return _EXPLICIT_TIME_PATTERN.search(text) is not None
+
+
+def _looks_like_explicit_seconds_text(text: str) -> bool:
+    return bool(re.search(r"(?:^|[T\s])\d{1,2}:\d{2}:\d{2}(?:$|[Z+\-])", text))
 
 
 def _has_zero_clock_time(value: datetime) -> bool:

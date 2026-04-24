@@ -107,3 +107,35 @@ def test_get_settings_reads_source_fetch_interval_values_from_runtime_env_file(t
     assert settings.source_fetch_interval_seconds == 3
     assert settings.bilibili_source_interval_seconds == 12
     assert settings.bilibili_retry_delay_seconds == 7
+
+
+def test_get_settings_reads_weekly_cover_cache_retention_days_from_runtime_env_file(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv('HOT_RUNTIME_ROOT', str(tmp_path))
+    monkeypatch.delenv('WEEKLY_COVER_CACHE_RETENTION_DAYS', raising=False)
+
+    env_file = tmp_path / 'data' / 'app.env'
+    env_file.parent.mkdir(parents=True, exist_ok=True)
+    env_file.write_text(
+        'WEEKLY_COVER_CACHE_RETENTION_DAYS=45\n',
+        encoding='utf-8-sig',
+    )
+
+    settings = get_settings()
+
+    assert settings.weekly_cover_cache_retention_days == 45
+
+
+def test_get_settings_reads_weekly_grade_push_threshold_from_runtime_env_file(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv('HOT_RUNTIME_ROOT', str(tmp_path))
+    monkeypatch.delenv('WEEKLY_GRADE_PUSH_THRESHOLD', raising=False)
+
+    env_file = tmp_path / 'data' / 'app.env'
+    env_file.parent.mkdir(parents=True, exist_ok=True)
+    env_file.write_text(
+        'WEEKLY_GRADE_PUSH_THRESHOLD=A\n',
+        encoding='utf-8-sig',
+    )
+
+    settings = get_settings()
+
+    assert settings.weekly_grade_push_threshold == 'A'

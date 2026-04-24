@@ -9,6 +9,8 @@ from sqlalchemy import select
 from app.db import create_session_factory, get_engine
 from app.models.base import Base
 from app.models.job import CollectionJob
+from app.models.schedule_plan import SchedulePlan
+from app.models.source import Source
 from app.services.scheduler_loop import SchedulerLoop
 from app.services.scheduler_service import SchedulerService
 
@@ -28,11 +30,34 @@ def setup_database(tmp_path: Path, name: str):
     return create_session_factory()
 
 
+def create_enabled_source(session, *, name: str, schedule_group: str) -> None:
+    session.add(
+        Source(
+            name=name,
+            site_name="Test",
+            entry_url=f"https://example.com/{name}",
+            fetch_mode="http",
+            parser_type="generic_css",
+            max_items=30,
+            enabled=True,
+            schedule_group=schedule_group,
+        )
+    )
+    session.commit()
+
+
+def create_plan(session, *, run_time: str, schedule_group: str) -> None:
+    session.add(SchedulePlan(enabled=True, run_time=run_time, schedule_group=schedule_group))
+    session.commit()
+
+
 def test_scheduler_loop_dispatches_job_when_due(tmp_path) -> None:
     session_factory = setup_database(tmp_path, "scheduler-loop-due.db")
     dispatcher = DummyDispatcher()
 
     with session_factory() as session:
+        create_enabled_source(session, name="morning-source", schedule_group="morning")
+        create_plan(session, run_time="08:00", schedule_group="morning")
         SchedulerService(session).update_settings(enabled=True, daily_time="08:00")
 
     loop = SchedulerLoop(
@@ -58,6 +83,7 @@ def test_scheduler_loop_skips_dispatch_when_not_due(tmp_path) -> None:
     dispatcher = DummyDispatcher()
 
     with session_factory() as session:
+        create_plan(session, run_time="08:00", schedule_group="morning")
         SchedulerService(session).update_settings(enabled=True, daily_time="08:00")
 
     loop = SchedulerLoop(
@@ -72,6 +98,6 @@ def test_scheduler_loop_skips_dispatch_when_not_due(tmp_path) -> None:
     with session_factory() as session:
         jobs = list(session.scalars(select(CollectionJob)).all())
 
-    assert created_job is None
+    assert created_job == []
     assert dispatcher.dispatch_count == 0
     assert jobs == []

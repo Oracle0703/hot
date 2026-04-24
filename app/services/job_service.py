@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.models.job import CollectionJob
 from app.models.job_log import JobLog
 from app.models.report import Report
+from app.models.schedule_plan import SchedulePlan
 from app.models.source import Source
 
 
@@ -15,8 +16,21 @@ class JobService:
     def __init__(self, session: Session) -> None:
         self.session = session
 
+    def _count_enabled_sources(
+        self,
+        *,
+        source_group: str | None = None,
+        schedule_group: str | None = None,
+    ) -> int:
+        statement = select(func.count()).select_from(Source).where(Source.enabled.is_(True))
+        if source_group is not None:
+            statement = statement.where(Source.source_group == source_group)
+        if schedule_group is not None:
+            statement = statement.where(Source.schedule_group == schedule_group)
+        return int(self.session.scalar(statement) or 0)
+
     def create_manual_job(self) -> CollectionJob:
-        total_sources = self.session.scalar(select(func.count()).select_from(Source).where(Source.enabled.is_(True)))
+        total_sources = self._count_enabled_sources()
         job = CollectionJob(trigger_type="manual", status="pending", total_sources=total_sources or 0)
         self.session.add(job)
         self.session.commit()
@@ -24,9 +38,7 @@ class JobService:
         return job
 
     def create_manual_job_for_group(self, group: str) -> CollectionJob | None:
-        total_sources = self.session.scalar(
-            select(func.count()).select_from(Source).where(Source.enabled.is_(True), Source.source_group == group)
-        )
+        total_sources = self._count_enabled_sources(source_group=group)
         if not total_sources:
             return None
         job = CollectionJob(
@@ -40,9 +52,39 @@ class JobService:
         self.session.refresh(job)
         return job
 
+    def create_manual_job_for_schedule_group(self, schedule_group: str) -> CollectionJob | None:
+        total_sources = self._count_enabled_sources(schedule_group=schedule_group)
+        if not total_sources:
+            return None
+        job = CollectionJob(
+            trigger_type="manual",
+            status="pending",
+            schedule_group_scope=schedule_group,
+            total_sources=total_sources,
+        )
+        self.session.add(job)
+        self.session.commit()
+        self.session.refresh(job)
+        return job
+
     def create_scheduled_job(self) -> CollectionJob:
-        total_sources = self.session.scalar(select(func.count()).select_from(Source).where(Source.enabled.is_(True)))
+        total_sources = self._count_enabled_sources()
         job = CollectionJob(trigger_type="scheduled", status="pending", total_sources=total_sources or 0)
+        self.session.add(job)
+        self.session.commit()
+        self.session.refresh(job)
+        return job
+
+    def create_scheduled_job_for_plan(self, plan: SchedulePlan) -> CollectionJob | None:
+        total_sources = self._count_enabled_sources(schedule_group=plan.schedule_group)
+        if not total_sources:
+            return None
+        job = CollectionJob(
+            trigger_type="scheduled",
+            status="pending",
+            schedule_group_scope=plan.schedule_group,
+            total_sources=total_sources,
+        )
         self.session.add(job)
         self.session.commit()
         self.session.refresh(job)

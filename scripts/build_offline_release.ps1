@@ -102,3 +102,12 @@ if (-not $DryRun) {
 }
 
 New-ReleaseArchive -SourceDir $ReleaseDir -DestinationZip $ZipPath
+
+# Phase 4 / REQ-SEC-020: 生成 SHA256SUMS.txt,运维侧凭此校验包完整性。
+if (-not $DryRun) {
+    $sumsPath = "$ZipPath.sha256"
+    $hash = Get-FileHash -Path $ZipPath -Algorithm SHA256
+    $line = "{0}  {1}" -f $hash.Hash.ToLower(), (Split-Path -Leaf $ZipPath)
+    Set-Content -Path $sumsPath -Value $line -Encoding ASCII
+    Write-Host "生成校验文件: $sumsPath"
+}

@@ -92,6 +92,17 @@
 
 如需共享示例数据，建议放到 `tests/fixtures/`、`docs/` 或单独的 `samples/` 目录，不要直接放进 `data/`。
 
+## 技术沉淀文档
+
+| 文档 | 说明 |
+| --- | --- |
+| `docs/architecture.md` | 系统分层、核心流程、运行数据和发布架构 |
+| `docs/development.md` | 本地开发、配置、测试、采集策略扩展规范 |
+| `docs/release.md` | 完整离线包、覆盖升级包、发布前检查和回滚建议 |
+| `docs/security.md` | 敏感数据、Git 忽略边界、日志脱敏和发布包边界 |
+| `docs/roadmap.md` | 技术沉淀阶段路线图 |
+| `docs/technical-decisions/0001-current-stack.md` | 当前技术栈取舍记录 |
+
 ## 开发运行
 
 ### 1. 初始化环境

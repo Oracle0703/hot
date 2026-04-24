@@ -54,3 +54,40 @@ def test_job_service_creates_manual_job_for_specific_group(tmp_path) -> None:
 
         assert job.total_sources == 1
         assert job.source_group_scope == "domestic"
+
+
+def test_job_service_creates_manual_job_for_schedule_group(tmp_path) -> None:
+    session_factory = setup_database(tmp_path, "job-service-schedule-group.db")
+    with session_factory() as session:
+        session.add(
+            Source(
+                name="早报来源",
+                site_name="Bilibili",
+                entry_url="https://example.com/morning",
+                fetch_mode="http",
+                parser_type="generic_css",
+                max_items=30,
+                enabled=True,
+                schedule_group="morning",
+            )
+        )
+        session.add(
+            Source(
+                name="晚报来源",
+                site_name="Bilibili",
+                entry_url="https://example.com/evening",
+                fetch_mode="http",
+                parser_type="generic_css",
+                max_items=30,
+                enabled=True,
+                schedule_group="evening",
+            )
+        )
+        session.commit()
+
+        job = JobService(session).create_manual_job_for_schedule_group("morning")
+
+        assert job is not None
+        assert job.total_sources == 1
+        assert job.schedule_group_scope == "morning"
+        assert job.source_group_scope is None

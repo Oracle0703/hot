@@ -13,18 +13,18 @@ function Resolve-SystemPython {
     $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
     if ($null -ne $pythonCommand) {
         return @{
-            FilePath = $pythonCommand.Source
+            FilePath   = $pythonCommand.Source
             PrefixArgs = @()
-            Display = $pythonCommand.Source
+            Display    = $pythonCommand.Source
         }
     }
 
     $pyCommand = Get-Command py -ErrorAction SilentlyContinue
     if ($null -ne $pyCommand) {
         return @{
-            FilePath = $pyCommand.Source
+            FilePath   = $pyCommand.Source
             PrefixArgs = @("-3")
-            Display = "$($pyCommand.Source) -3"
+            Display    = "$($pyCommand.Source) -3"
         }
     }
 
@@ -43,7 +43,8 @@ function Test-PythonModule {
     try {
         & $FilePath @PrefixArgs -c "import $ModuleName" 2>$null | Out-Null
         return $LASTEXITCODE -eq 0
-    } finally {
+    }
+    finally {
         $global:ErrorActionPreference = $previousErrorActionPreference
     }
 }
@@ -65,7 +66,8 @@ function Invoke-Step {
             if ($LASTEXITCODE -ne 0) {
                 throw "命令执行失败: $DisplayCommand"
             }
-        } finally {
+        }
+        finally {
             $env:PYINSTALLER_CONFIG_DIR = $previousConfigDir
         }
     }
@@ -74,9 +76,9 @@ function Invoke-Step {
 $pythonCandidates = @()
 if (Test-Path $VenvPython) {
     $pythonCandidates += @{
-        FilePath = $VenvPython
+        FilePath   = $VenvPython
         PrefixArgs = @()
-        Display = ".venv\Scripts\python.exe"
+        Display    = ".venv\Scripts\python.exe"
     }
 }
 $pythonCandidates += Resolve-SystemPython
@@ -96,3 +98,36 @@ if ($null -eq $pythonRuntime) {
 $arguments = @($pythonRuntime.PrefixArgs + @("-m", "PyInstaller", $SpecFile, "--noconfirm", "--clean"))
 $display = "$($pythonRuntime.Display) -m PyInstaller hot_collector.spec --noconfirm --clean"
 Invoke-Step -FilePath $pythonRuntime.FilePath -Arguments $arguments -DisplayCommand $display
+
+# Phase 1 / REQ-SYS-001: 注入 VERSION 文件 (commit + 构建时间 + channel)
+$versionTarget = Join-Path $ProjectRoot 'dist\HotCollectorLauncher\VERSION'
+$existingVersion = Join-Path $ProjectRoot 'VERSION'
+if (Test-Path $existingVersion) {
+    $declaredVersion = (Get-Content $existingVersion | Where-Object { $_ -like 'version=*' } | Select-Object -First 1) -replace '^version=', ''
+}
+else {
+    $declaredVersion = '1.0.0-dev'
+}
+if (-not $declaredVersion) { $declaredVersion = '1.0.0-dev' }
+
+try {
+    $commit = (& git -C $ProjectRoot rev-parse --short HEAD 2>$null).Trim()
+}
+catch {
+    $commit = 'unknown'
+}
+if (-not $commit) { $commit = 'unknown' }
+
+$builtAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+$channel = if ($env:HOT_RELEASE_CHANNEL) { $env:HOT_RELEASE_CHANNEL } else { 'stable' }
+
+$lines = @(
+    "version=$declaredVersion",
+    "commit=$commit",
+    "built_at=$builtAt",
+    "channel=$channel"
+)
+if (Test-Path (Split-Path -Parent $versionTarget)) {
+    Set-Content -Path $versionTarget -Value $lines -Encoding ASCII
+    Write-Host "已注入 VERSION: $versionTarget"
+}

@@ -15,7 +15,9 @@ HOOKS_DIR = PROJECT_ROOT / "hooks"
 
 hiddenimports = collect_submodules("app") + collect_submodules("playwright") + [
     "pymysql",
+    "pythoncom",
     "playwright.async_api",
+    "pywintypes",
     "uvicorn.logging",
     "uvicorn.loops.auto",
     "uvicorn.protocols.http.auto",
@@ -23,7 +25,7 @@ hiddenimports = collect_submodules("app") + collect_submodules("playwright") + [
     "uvicorn.lifespan.on",
 ]
 
-datas = collect_data_files("playwright")
+datas = collect_data_files("playwright") + collect_data_files("pywin32_system32")
 readme_path = PROJECT_ROOT / "README-运营版.txt"
 if readme_path.exists():
     datas.append((str(readme_path), "."))

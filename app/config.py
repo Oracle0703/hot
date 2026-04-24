@@ -25,6 +25,8 @@ DEFAULT_OUTBOUND_PROXY_BYPASS_DOMAINS = "bilibili.com,hdslb.com,bilivideo.com"
 DEFAULT_SOURCE_FETCH_INTERVAL_SECONDS = 0
 DEFAULT_BILIBILI_SOURCE_INTERVAL_SECONDS = 0
 DEFAULT_BILIBILI_RETRY_DELAY_SECONDS = 5
+DEFAULT_WEEKLY_COVER_CACHE_RETENTION_DAYS = 60
+DEFAULT_WEEKLY_GRADE_PUSH_THRESHOLD = "B+"
 
 
 @dataclass(slots=True)
@@ -48,6 +50,8 @@ class Settings:
     source_fetch_interval_seconds: int = DEFAULT_SOURCE_FETCH_INTERVAL_SECONDS
     bilibili_source_interval_seconds: int = DEFAULT_BILIBILI_SOURCE_INTERVAL_SECONDS
     bilibili_retry_delay_seconds: int = DEFAULT_BILIBILI_RETRY_DELAY_SECONDS
+    weekly_cover_cache_retention_days: int = DEFAULT_WEEKLY_COVER_CACHE_RETENTION_DAYS
+    weekly_grade_push_threshold: str = DEFAULT_WEEKLY_GRADE_PUSH_THRESHOLD
 
 
 def _load_runtime_env_values() -> dict[str, str]:
@@ -89,6 +93,42 @@ def _hydrate_process_env(file_values: dict[str, str]) -> None:
 def get_settings() -> Settings:
     file_values = _load_runtime_env_values()
     _hydrate_process_env(file_values)
+    # 优先走 Pydantic schema 验证(REQ-CFG-001):若任何字段非法直接抛 ValidationError,
+    # 调用方应在启动期 catch 并落 launcher.log。失败时回退到旧的宽松 dict 解析,
+    # 以保证已经在生产运行的旧 app.env(可能含历史脏数据)不会因校验直接拒绝启动。
+    try:
+        from app.config_schema import SettingsSchema
+
+        schema = SettingsSchema()
+        return Settings(
+            app_name=schema.app_name,
+            environment=schema.environment,
+            debug=schema.debug,
+            database_url=schema.database_url,
+            reports_root=schema.reports_root,
+            enable_scheduler=schema.enable_scheduler,
+            scheduler_poll_seconds=schema.scheduler_poll_seconds,
+            enable_dingtalk_notifier=schema.enable_dingtalk_notifier,
+            dingtalk_webhook=schema.dingtalk_webhook,
+            dingtalk_secret=schema.dingtalk_secret,
+            dingtalk_keyword=schema.dingtalk_keyword,
+            bilibili_cookie=schema.bilibili_cookie,
+            report_share_dir=schema.report_share_dir,
+            enable_site_proxy_rules=schema.enable_site_proxy_rules,
+            outbound_proxy_url=schema.outbound_proxy_url,
+            outbound_proxy_bypass_domains=schema.outbound_proxy_bypass_domains,
+            source_fetch_interval_seconds=schema.source_fetch_interval_seconds,
+            bilibili_source_interval_seconds=schema.bilibili_source_interval_seconds,
+            bilibili_retry_delay_seconds=schema.bilibili_retry_delay_seconds,
+            weekly_cover_cache_retention_days=schema.weekly_cover_cache_retention_days,
+            weekly_grade_push_threshold=schema.weekly_grade_push_threshold,
+        )
+    except Exception:
+        # 兼容旧解析 — 详细 fallback 见下方 _legacy_get_settings
+        return _legacy_get_settings(file_values)
+
+
+def _legacy_get_settings(file_values: dict[str, str]) -> Settings:
     return Settings(
         app_name=_get_env_value('APP_NAME', file_values, DEFAULT_APP_NAME),
         environment=_get_env_value('APP_ENV', file_values, DEFAULT_ENVIRONMENT),
@@ -109,4 +149,6 @@ def get_settings() -> Settings:
         source_fetch_interval_seconds=int(_get_env_value('SOURCE_FETCH_INTERVAL_SECONDS', file_values, str(DEFAULT_SOURCE_FETCH_INTERVAL_SECONDS))),
         bilibili_source_interval_seconds=int(_get_env_value('BILIBILI_SOURCE_INTERVAL_SECONDS', file_values, str(DEFAULT_BILIBILI_SOURCE_INTERVAL_SECONDS))),
         bilibili_retry_delay_seconds=int(_get_env_value('BILIBILI_RETRY_DELAY_SECONDS', file_values, str(DEFAULT_BILIBILI_RETRY_DELAY_SECONDS))),
+        weekly_cover_cache_retention_days=int(_get_env_value('WEEKLY_COVER_CACHE_RETENTION_DAYS', file_values, str(DEFAULT_WEEKLY_COVER_CACHE_RETENTION_DAYS))),
+        weekly_grade_push_threshold=_get_env_value('WEEKLY_GRADE_PUSH_THRESHOLD', file_values, DEFAULT_WEEKLY_GRADE_PUSH_THRESHOLD).strip() or DEFAULT_WEEKLY_GRADE_PUSH_THRESHOLD,
     )

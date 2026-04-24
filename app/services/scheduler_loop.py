@@ -41,7 +41,7 @@ class SchedulerLoop:
     def run_once(self) -> object | None:
         with self.session_factory() as session:
             created_job = SchedulerService(session).run_due_jobs(self.clock())
-        if created_job is not None:
+        if created_job:
             self.job_dispatcher.dispatch_pending_jobs()
         return created_job
 

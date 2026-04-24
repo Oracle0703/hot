@@ -174,24 +174,21 @@ def test_dingtalk_webhook_service_sends_one_message_per_source_with_throttle(tmp
         first_markdown = requests[0]["payload"]["markdown"]
         second_markdown = requests[1]["payload"]["markdown"]
 
-        assert str(second_job.id) not in first_markdown["title"]
-        assert "1/2" in first_markdown["title"]
-        assert "A频道" in first_markdown["title"]
-        assert "**任务ID" not in first_markdown["text"]
-        assert "#### A频道新增 4 条" in first_markdown["text"]
+        assert first_markdown["title"] == "热点报告 A频道"
+        assert "### 热点报告 A频道" in first_markdown["text"]
         assert "1. [A新帖子1](https://example.com/post-a-new-1)" in first_markdown["text"]
+        assert "发布时间：2026-03-24 10:00" in first_markdown["text"]
         assert "2. [A新帖子2](https://example.com/post-a-new-2)" in first_markdown["text"]
+        assert "发布时间：2026-03-24 10:01" in first_markdown["text"]
         assert "3. [A新帖子3](https://example.com/post-a-new-3)" in first_markdown["text"]
+        assert "发布时间：2026-03-24 10:02" in first_markdown["text"]
         assert "4. [A新帖子4](https://example.com/post-a-new-4)" in first_markdown["text"]
-        assert "其余" not in first_markdown["text"]
+        assert "发布时间：2026-03-24 10:03" in first_markdown["text"]
 
-        assert str(second_job.id) not in second_markdown["title"]
-        assert "2/2" in second_markdown["title"]
-        assert "B频道" in second_markdown["title"]
-        assert "**任务ID" not in second_markdown["text"]
-        assert "#### B频道新增 1 条" in second_markdown["text"]
+        assert second_markdown["title"] == "热点报告 B频道"
+        assert "### 热点报告 B频道" in second_markdown["text"]
         assert "1. [B新帖子1](https://example.com/post-b-new-1)" in second_markdown["text"]
-        assert "其余" not in second_markdown["text"]
+        assert "发布时间：2026-03-24 11:00" in second_markdown["text"]
 
 
 def test_dingtalk_webhook_service_uses_bilibili_up_name_and_hides_job_id(tmp_path) -> None:
@@ -243,12 +240,185 @@ def test_dingtalk_webhook_service_uses_bilibili_up_name_and_hides_job_id(tmp_pat
         assert len(requests) == 1
 
         markdown = requests[0]["markdown"]
-        assert str(job.id) not in markdown["title"]
+        assert markdown["title"] == "热点报告 真实UP主"
         assert str(job.id) not in markdown["text"]
-        assert "**任务ID" not in markdown["text"]
-        assert "**采集源：** 真实UP主" in markdown["text"]
-        assert "#### 真实UP主新增 1 条" in markdown["text"]
+        assert "### 热点报告 真实UP主" in markdown["text"]
         assert "B站UP-20411266-视频投稿" not in markdown["text"]
+
+
+def test_dingtalk_webhook_service_formats_bilibili_stats_on_second_line(tmp_path, monkeypatch) -> None:
+    session_factory = setup_database(tmp_path, "dingtalk-webhook-bilibili-stats.db")
+
+    with session_factory() as session:
+        source = create_source(session, "B站UP-4186021-视频投稿", "https://space.bilibili.com/4186021")
+        source.collection_strategy = "bilibili_profile_videos_recent"
+        job = JobService(session).create_manual_job()
+        ReportService(session).generate_for_job(
+            job,
+            [
+                {
+                    "source_id": source.id,
+                    "source_name": source.name,
+                    "items": [
+                        {
+                            "title": "PRAGMATA/识质存在：恰到好处的力竭",
+                            "url": "https://www.bilibili.com/video/BV1z4oWB3Ex9",
+                            "author": "初夏ChuXXia",
+                            "published_at": "2026-04-22 11:57:57",
+                        }
+                    ],
+                }
+            ],
+        )
+
+        monkeypatch.setattr(
+            DingTalkWebhookService,
+            "_fetch_bilibili_video_detail_by_url",
+            lambda self, url: {
+                "author": "初夏ChuXXia",
+                "published_at_text": "2026-04-22 11:57:57",
+                "like_count": 3689,
+                "reply_count": 206,
+                "view_count": 61317,
+                "cover_image_url": "https://i0.hdslb.com/demo.jpg",
+            },
+        )
+
+        requests: list[dict[str, object]] = []
+
+        def fake_sender(
+            webhook: str,
+            payload: dict[str, object],
+            timeout_seconds: float,
+            secret: str | None,
+        ) -> None:
+            requests.append(payload)
+
+        service = DingTalkWebhookService(
+            session=session,
+            settings=Settings(
+                dingtalk_webhook="https://oapi.dingtalk.com/robot/send?access_token=test-token",
+                enable_dingtalk_notifier=True,
+            ),
+            sender=fake_sender,
+        )
+
+        assert service.notify_job_summary(job) is True
+        assert len(requests) == 1
+        markdown_text = requests[0]["markdown"]["text"]
+        assert requests[0]["markdown"]["title"] == "热点报告 初夏ChuXXia"
+        assert "1. [PRAGMATA/识质存在：恰到好处的力竭](https://www.bilibili.com/video/BV1z4oWB3Ex9)" in markdown_text
+        assert (
+            "发布时间：2026-04-22 11:57 | 点赞：3689 | 评论：206 | 播放：61317"
+            in markdown_text
+        )
+        assert "封面图：https://i0.hdslb.com/demo.jpg" in markdown_text
+
+
+def test_dingtalk_webhook_service_prefers_persisted_stats_without_detail_refetch(tmp_path, monkeypatch) -> None:
+    session_factory = setup_database(tmp_path, "dingtalk-webhook-persisted-stats.db")
+
+    with session_factory() as session:
+        source = create_source(session, "B站UP-4186021-视频投稿", "https://space.bilibili.com/4186021")
+        source.collection_strategy = "bilibili_profile_videos_recent"
+        job = JobService(session).create_manual_job()
+        ReportService(session).generate_for_job(
+            job,
+            [
+                {
+                    "source_id": source.id,
+                    "source_name": source.name,
+                    "items": [
+                        {
+                            "title": "持久化统计视频",
+                            "url": "https://www.bilibili.com/video/BV1z4oWB3Ex9",
+                            "author": "初夏ChuXXia",
+                            "published_at": "2026-04-22 11:57:57",
+                            "cover_image_url": "https://i0.hdslb.com/persisted.jpg",
+                            "like_count": 3689,
+                            "reply_count": 206,
+                            "view_count": 61317,
+                        }
+                    ],
+                }
+            ],
+        )
+
+        def fail_fetch(self, url):
+            raise AssertionError("should not refetch bilibili detail when counts are already persisted")
+
+        monkeypatch.setattr(DingTalkWebhookService, "_fetch_bilibili_video_detail_by_url", fail_fetch)
+
+        requests: list[dict[str, object]] = []
+
+        def fake_sender(
+            webhook: str,
+            payload: dict[str, object],
+            timeout_seconds: float,
+            secret: str | None,
+        ) -> None:
+            requests.append(payload)
+
+        service = DingTalkWebhookService(
+            session=session,
+            settings=Settings(
+                dingtalk_webhook="https://oapi.dingtalk.com/robot/send?access_token=test-token",
+                enable_dingtalk_notifier=True,
+            ),
+            sender=fake_sender,
+        )
+
+        assert service.notify_job_summary(job) is True
+        markdown_text = requests[0]["markdown"]["text"]
+        assert "点赞：3689 | 评论：206 | 播放：61317" in markdown_text
+        assert "1. [持久化统计视频](https://www.bilibili.com/video/BV1z4oWB3Ex9)" in markdown_text
+        assert "封面图：https://i0.hdslb.com/persisted.jpg" in markdown_text
+
+
+def test_dingtalk_webhook_service_does_not_duplicate_hot_report_prefix_when_label_already_has_it(tmp_path) -> None:
+    session_factory = setup_database(tmp_path, "dingtalk-webhook-hot-report-prefix.db")
+
+    with session_factory() as session:
+        source = create_source(session, "热点报告 初夏ChuXXia", "https://example.com/source")
+        job = JobService(session).create_manual_job()
+        ReportService(session).generate_for_job(
+            job,
+            [
+                {
+                    "source_id": source.id,
+                    "source_name": source.name,
+                    "items": [
+                        {
+                            "title": "普通帖子",
+                            "url": "https://example.com/post-1",
+                            "published_at": "2026-04-22 11:57:57",
+                        }
+                    ],
+                }
+            ],
+        )
+
+        requests: list[dict[str, object]] = []
+
+        def fake_sender(
+            webhook: str,
+            payload: dict[str, object],
+            timeout_seconds: float,
+            secret: str | None,
+        ) -> None:
+            requests.append(payload)
+
+        service = DingTalkWebhookService(
+            session=session,
+            settings=Settings(
+                dingtalk_webhook="https://oapi.dingtalk.com/robot/send?access_token=test-token",
+                enable_dingtalk_notifier=True,
+            ),
+            sender=fake_sender,
+        )
+
+        assert service.notify_job_summary(job) is True
+        assert requests[0]["markdown"]["title"] == "热点报告 初夏ChuXXia"
 
 
 def test_dingtalk_webhook_service_adds_signature_query_when_secret_is_configured(tmp_path) -> None:

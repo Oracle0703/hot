@@ -47,10 +47,12 @@ def test_index_page_shows_dashboard_actions(tmp_path) -> None:
     assert "quick-actions" in response.text
     assert "立即采集国内" in response.text
     assert "立即采集国外" in response.text
+    assert "按调度分组运行" in response.text
     assert "/jobs/run/domestic" in response.text
     assert "/jobs/run/overseas" in response.text
     assert "/sources" in response.text
     assert "/reports" in response.text
+    assert "/weekly" in response.text
 
 
 def test_post_run_job_redirects_to_job_detail_page(tmp_path) -> None:
@@ -328,6 +330,7 @@ def test_source_edit_page_shows_common_edit_fields(tmp_path) -> None:
     assert "name='entry_url'" in response.text
     assert "name='search_keyword'" in response.text
     assert "name='source_group'" in response.text
+    assert "name='schedule_group'" in response.text
     assert "name='max_items'" in response.text
     assert "name='enabled'" in response.text
     assert "name='fetch_mode'" not in response.text
@@ -363,6 +366,7 @@ def test_saving_source_edit_updates_source_and_redirects_to_sources_list(tmp_pat
             "entry_url": "https://example.com/nga-updated",
             "search_keyword": "",
             "source_group": "overseas",
+            "schedule_group": "evening",
             "max_items": "15",
             "enabled": "",
         },
@@ -376,6 +380,7 @@ def test_saving_source_edit_updates_source_and_redirects_to_sources_list(tmp_pat
     assert updated["name"] == "NGA Hot Edited"
     assert updated["entry_url"] == "https://example.com/nga-updated"
     assert updated["source_group"] == "overseas"
+    assert updated["schedule_group"] == "evening"
     assert updated["max_items"] == 15
     assert updated["enabled"] is False
 
@@ -412,6 +417,8 @@ def test_scheduler_page_shows_settings_panel(tmp_path, monkeypatch) -> None:
     assert "app-shell" in response.text
     assert "scheduler-settings-panel" in response.text
     assert "name='daily_time'" in response.text
+    assert "兼容旧版默认时间" in response.text
+    assert "实际调度以“调度计划”列表为准" in response.text
     assert "启用钉钉群通知" in response.text
     assert "name='webhook'" in response.text
     assert str(get_runtime_paths(tmp_path).env_file) in response.text
@@ -457,6 +464,7 @@ def test_new_source_page_shows_simplified_source_form_fields(tmp_path) -> None:
     assert "name='entry_url'" in response.text
     assert "name='search_keyword'" in response.text
     assert "name='source_group'" in response.text
+    assert "name='schedule_group'" in response.text
     assert "name='max_items'" in response.text
     assert "https://space.bilibili.com/20411266" in response.text
     assert "name='name'" not in response.text
@@ -519,6 +527,74 @@ def test_post_run_overseas_job_redirects_to_job_detail_page(tmp_path) -> None:
 
     assert response.status_code == 303
     assert response.headers["location"].startswith("/jobs/")
+
+
+def test_post_run_schedule_group_job_redirects_to_job_detail_page(tmp_path) -> None:
+    client = create_test_client(make_sqlite_url(tmp_path, "pages-run-schedule-group.db"))
+    client.post(
+        "/api/sources",
+        json={
+            "name": "晨报来源",
+            "site_name": "Bilibili",
+            "entry_url": "https://example.com/morning",
+            "fetch_mode": "http",
+            "parser_type": "generic_css",
+            "list_selector": ".topic",
+            "title_selector": ".topic-link",
+            "link_selector": ".topic-link",
+            "meta_selector": ".topic-time",
+            "include_keywords": ["新游"],
+            "exclude_keywords": [],
+            "max_items": 30,
+            "enabled": True,
+            "source_group": "domestic",
+            "schedule_group": "morning",
+        },
+    )
+
+    response = client.post("/jobs/run/schedule-group/morning", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert response.headers["location"].startswith("/jobs/")
+
+
+def test_post_run_schedule_group_job_without_sources_does_not_create_empty_job(tmp_path) -> None:
+    client = create_test_client(make_sqlite_url(tmp_path, "pages-run-schedule-group-empty.db"))
+
+    response = client.post("/jobs/run/schedule-group/morning", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/?run_schedule_group_empty=morning"
+
+
+def test_job_detail_page_shows_schedule_group_scope_label(tmp_path) -> None:
+    client = create_test_client(make_sqlite_url(tmp_path, "pages-detail-schedule-group-scope.db"))
+    client.post(
+        "/api/sources",
+        json={
+            "name": "晨报来源",
+            "site_name": "Bilibili",
+            "entry_url": "https://example.com/morning",
+            "fetch_mode": "http",
+            "parser_type": "generic_css",
+            "list_selector": ".topic",
+            "title_selector": ".topic-link",
+            "link_selector": ".topic-link",
+            "meta_selector": ".topic-time",
+            "include_keywords": ["新游"],
+            "exclude_keywords": [],
+            "max_items": 30,
+            "enabled": True,
+            "schedule_group": "morning",
+        },
+    )
+
+    run_response = client.post("/jobs/run/schedule-group/morning", follow_redirects=False)
+    job_id = run_response.headers["location"].rsplit("/", 1)[-1]
+    response = client.get(f"/jobs/{job_id}")
+
+    assert response.status_code == 200
+    assert "执行范围：调度分组 morning" in response.text
 
 
 def test_post_run_domestic_job_without_sources_does_not_create_empty_job(tmp_path) -> None:

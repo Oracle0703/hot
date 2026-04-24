@@ -2,8 +2,11 @@
 
 import os
 import re
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+
+import portalocker
 
 from app.config import get_settings
 from app.runtime_paths import get_runtime_paths
@@ -214,7 +217,19 @@ class AppEnvService:
             for key in MANAGED_KEYS:
                 lines.append(f'{key}=')
 
-        self.env_file.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+        content = '\n'.join(lines) + '\n'
+        lock_path = self.env_file.with_name(self.env_file.name + '.lock')
+        with portalocker.Lock(str(lock_path), 'w', timeout=10):
+            tmp_fd, tmp_name = tempfile.mkstemp(
+                prefix=self.env_file.name + '.', suffix='.tmp', dir=str(self.env_file.parent)
+            )
+            try:
+                with os.fdopen(tmp_fd, 'w', encoding='utf-8', newline='') as fp:
+                    fp.write(content)
+                os.replace(tmp_name, self.env_file)
+            except Exception:
+                Path(tmp_name).unlink(missing_ok=True)
+                raise
 
     def _get_bool(self, value: str | None, default: bool) -> bool:
         if value is None:

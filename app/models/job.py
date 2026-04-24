@@ -16,6 +16,7 @@ class CollectionJob(Base):
     trigger_type: Mapped[str] = mapped_column(String(20), nullable=False, default="manual")
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="pending")
     source_group_scope: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    schedule_group_scope: Mapped[str | None] = mapped_column(String(100), nullable=True)
     total_sources: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     completed_sources: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     success_sources: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

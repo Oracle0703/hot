@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import atexit
 import logging
+import logging.handlers
 import os
 import socket
 import threading
@@ -29,6 +30,8 @@ KNOWN_APP_ENV_KEYS = {
     "DINGTALK_WEBHOOK",
     "DINGTALK_SECRET",
     "DINGTALK_KEYWORD",
+    "WEEKLY_COVER_CACHE_RETENTION_DAYS",
+    "WEEKLY_GRADE_PUSH_THRESHOLD",
 }
 
 
@@ -131,7 +134,12 @@ def setup_logging(paths: RuntimePaths) -> logging.Logger:
         return logger
 
     logger.setLevel(logging.INFO)
-    handler = logging.FileHandler(paths.launcher_log_file, encoding="utf-8")
+    handler = logging.handlers.RotatingFileHandler(
+        paths.launcher_log_file,
+        maxBytes=10 * 1024 * 1024,
+        backupCount=5,
+        encoding="utf-8",
+    )
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
     logger.addHandler(handler)
     logger.propagate = False
@@ -225,4 +233,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

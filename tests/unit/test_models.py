@@ -3,6 +3,7 @@
 from app.models.item import CollectedItem
 from app.models.job import CollectionJob
 from app.models.report import Report
+from app.models.schedule_plan import SchedulePlan
 from app.models.source import Source
 
 
@@ -13,6 +14,7 @@ def test_source_model_requires_core_fields() -> None:
     assert columns["entry_url"].nullable is False
     assert columns["fetch_mode"].nullable is False
     assert "source_group" in columns
+    assert "schedule_group" in columns
     assert columns["enabled"].default.arg is True
 
 
@@ -21,6 +23,16 @@ def test_collection_job_status_defaults_to_pending() -> None:
 
     assert status_column.default.arg == "pending"
     assert "source_group_scope" in CollectionJob.__table__.columns
+    assert "schedule_group_scope" in CollectionJob.__table__.columns
+
+
+def test_schedule_plan_model_keeps_required_columns() -> None:
+    columns = SchedulePlan.__table__.columns
+
+    assert columns["enabled"].nullable is False
+    assert "run_time" in columns
+    assert "schedule_group" in columns
+    assert "last_triggered_on" in columns
 
 
 def test_collected_item_has_unique_normalized_hash() -> None:
@@ -41,6 +53,14 @@ def test_collected_item_tracks_first_and_last_seen_fields() -> None:
     assert "first_seen_job_id" in columns
     assert "last_seen_job_id" in columns
     assert "image_urls" in columns
+    assert "cover_image_url" in columns
+    assert "like_count" in columns
+    assert "reply_count" in columns
+    assert "view_count" in columns
+    assert "recommended_grade" in columns
+    assert "manual_grade" in columns
+    assert "pushed_to_dingtalk_at" in columns
+    assert "pushed_to_dingtalk_batch_id" in columns
     assert columns["first_seen_job_id"].nullable is True
     assert columns["last_seen_job_id"].nullable is True
     assert len(columns["first_seen_job_id"].foreign_keys) == 1

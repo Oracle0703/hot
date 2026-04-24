@@ -14,9 +14,11 @@ from app.config import get_settings
 from app.models.job import CollectionJob
 from app.models.job_log import JobLog
 from app.models.source import Source
+from app.services import cancel_registry
 from app.services.dingtalk_webhook_service import DingTalkWebhookService
 from app.services.report_distribution_service import ReportDistributionService
 from app.services.report_service import ReportService
+from app.services.weekly_cover_cache_service import WeeklyCoverCacheService
 
 
 class JobRunner:
@@ -49,7 +51,12 @@ class JobRunner:
                 session.scalars(
                     select(Source)
                     .where(Source.enabled.is_(True))
-                    .where(Source.source_group == job.source_group_scope if job.source_group_scope else True)
+                    .where(Source.schedule_group == job.schedule_group_scope if job.schedule_group_scope else True)
+                    .where(
+                        Source.source_group == job.source_group_scope
+                        if job.source_group_scope and not job.schedule_group_scope
+                        else True
+                    )
                     .order_by(Source.id.asc())
                 ).all()
             )
@@ -59,7 +66,19 @@ class JobRunner:
             job.started_at = datetime.utcnow()
             session.commit()
 
+            cancelled = False
             for index, source in enumerate(enabled_sources):
+                if cancel_registry.is_cancelled(job.id):
+                    cancelled = True
+                    session.add(
+                        JobLog(
+                            job_id=job.id,
+                            level="warning",
+                            message="job cancelled by operator (cooperative)",
+                        )
+                    )
+                    session.commit()
+                    break
                 if index > 0:
                     self._sleep_before_source(source)
                 job.current_source = source.name
@@ -90,9 +109,12 @@ class JobRunner:
                     )
                 session.commit()
 
+            cancel_registry.consume(job.id)
             job.current_source = None
             job.finished_at = datetime.utcnow()
-            if job.failed_sources > 0 and job.success_sources == 0:
+            if cancelled:
+                job.status = "cancelled"
+            elif job.failed_sources > 0 and job.success_sources == 0:
                 job.status = "failed"
             elif job.failed_sources > 0:
                 job.status = "partial_success"
@@ -135,6 +157,22 @@ class JobRunner:
                 )
                 session.commit()
 
+            try:
+                self._prune_weekly_cover_cache(session)
+            except Exception as exc:  # noqa: BLE001
+                session.rollback()
+                job = session.get(CollectionJob, job.id)
+                if job is None:
+                    raise
+                session.add(
+                    JobLog(
+                        job_id=job.id,
+                        level="warning",
+                        message=f"weekly cover cache prune failed: {exc}",
+                    )
+                )
+                session.commit()
+
             self.notification_scheduler(lambda job_id=job.id: self._notify_job_summary(job_id))
             return job.id
 
@@ -153,6 +191,11 @@ class JobRunner:
     def _schedule_notification_background(self, task: Callable[[], None]) -> None:
         thread = threading.Thread(target=task, daemon=True)
         thread.start()
+
+    def _prune_weekly_cover_cache(self, session) -> None:
+        settings = self.settings_provider()
+        retention_days = int(max(int(getattr(settings, 'weekly_cover_cache_retention_days', 60) or 60), 1))
+        WeeklyCoverCacheService(session).prune(max_age_days=retention_days)
 
     def _notify_job_summary(self, job_id: UUID) -> None:
         with self.session_factory() as session:

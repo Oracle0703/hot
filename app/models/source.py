@@ -26,7 +26,9 @@ class Source(Base):
     max_items: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     source_group: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    schedule_group: Mapped[str | None] = mapped_column(String(100), nullable=True)
     collection_strategy: Mapped[str] = mapped_column(String(50), nullable=False, default="generic_css")
     search_keyword: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    retry_policy: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     items = relationship("CollectedItem", back_populates="source")

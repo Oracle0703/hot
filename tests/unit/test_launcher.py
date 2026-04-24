@@ -19,6 +19,7 @@ def make_runtime_paths(root: Path) -> RuntimePaths:
         env_file=root / 'data' / 'app.env',
         pid_file=root / 'data' / 'launcher.pid',
         launcher_log_file=root / 'logs' / 'launcher.log',
+        app_log_file=root / 'logs' / 'app.log',
     )
 
 
@@ -85,6 +86,22 @@ def test_build_runtime_environment_loads_dingtalk_values_from_env_file(tmp_path)
     assert values['DINGTALK_WEBHOOK'].endswith('access_token=test-token')
     assert values['DINGTALK_SECRET'] == 'SECdemo'
     assert values['DINGTALK_KEYWORD'] == '热点报告'
+
+
+def test_build_runtime_environment_reads_weekly_settings_from_process_env(tmp_path) -> None:
+    paths = make_runtime_paths(tmp_path)
+
+    values = build_runtime_environment(
+        paths,
+        file_values={},
+        process_env={
+            'WEEKLY_COVER_CACHE_RETENTION_DAYS': '45',
+            'WEEKLY_GRADE_PUSH_THRESHOLD': 'A',
+        },
+    )
+
+    assert values['WEEKLY_COVER_CACHE_RETENTION_DAYS'] == '45'
+    assert values['WEEKLY_GRADE_PUSH_THRESHOLD'] == 'A'
 
 
 def test_build_browser_url_uses_loopback_for_wildcard_host() -> None:

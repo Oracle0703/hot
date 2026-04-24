@@ -19,6 +19,7 @@ class RuntimePaths:
     env_file: Path
     pid_file: Path
     launcher_log_file: Path
+    app_log_file: Path
 
     def ensure_directories(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -55,6 +56,7 @@ def get_runtime_paths(explicit_root: str | Path | None = None) -> RuntimePaths:
     env_file = data_dir / "app.env"
     pid_file = data_dir / "launcher.pid"
     launcher_log_file = logs_dir / "launcher.log"
+    app_log_file = logs_dir / "app.log"
     return RuntimePaths(
         runtime_root=runtime_root,
         data_dir=data_dir,
@@ -67,4 +69,5 @@ def get_runtime_paths(explicit_root: str | Path | None = None) -> RuntimePaths:
         env_file=env_file,
         pid_file=pid_file,
         launcher_log_file=launcher_log_file,
+        app_log_file=app_log_file,
     )
