@@ -305,6 +305,9 @@ def test_sources_page_lists_sources_and_actions(tmp_path) -> None:
     assert "国外采集源" in response.text
     assert "未分组采集源" in response.text
     assert "resource-card" in response.text
+    assert "source-group-section" in response.text
+    assert "source-group-header" in response.text
+    assert "source-group-count" in response.text
     assert "NGA Hot" in response.text
     assert "编辑" in response.text
     assert "/sources/" in response.text

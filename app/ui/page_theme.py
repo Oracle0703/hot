@@ -447,6 +447,31 @@ a { color: inherit; text-decoration: none; }
 .dashboard-secondary-panel .panel-title {
   color: rgba(234, 244, 255, 0.86);
 }
+.source-group-section {
+  margin-top: 14px;
+}
+.source-group-section .panel-header {
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(134, 195, 255, 0.1);
+}
+.source-group-section .panel-title {
+  font-size: 20px;
+}
+.source-group-header {
+  display: inline-flex;
+  align-items: center;
+}
+.source-group-count {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: rgba(105, 188, 255, 0.14);
+  color: #d3ecff;
+  font-size: 12px;
+  font-weight: 700;
+}
 .panel-body > :first-child { margin-top: 0; }
 .panel-body > :last-child { margin-bottom: 0; }
 .data-table-wrapper {

@@ -896,7 +896,10 @@ def sources_page(request: Request, session: Session = Depends(get_db_session)) -
                     if sources
                     else "<div class='empty-state'>当前分组暂无采集源。</div>"
                 ),
-                extra_class='sources-group-panel',
+                extra_class='sources-group-panel source-group-section',
+                actions=(
+                    f"<div class='source-group-header'><span class='source-group-count'>{len(sources)} 个来源</span></div>"
+                ),
             )
             for title, sources in grouped_sources
         )
