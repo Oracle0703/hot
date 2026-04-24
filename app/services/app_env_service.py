@@ -10,6 +10,7 @@ import portalocker
 
 from app.config import get_settings
 from app.runtime_paths import get_runtime_paths
+from app.services import config_encryption
 
 MANAGED_KEYS = (
     'ENABLE_DINGTALK_NOTIFIER',
@@ -24,6 +25,15 @@ MANAGED_KEYS = (
     'BILIBILI_SOURCE_INTERVAL_SECONDS',
     'BILIBILI_RETRY_DELAY_SECONDS',
 )
+# REQ-SEC-001: 这些字段在 CONFIG_ENCRYPTION_KEY 启用时会被 Fernet 加密,
+# 带 ``enc:`` 前缀落盘;未启用时透传明文并走一次 warning。
+SENSITIVE_KEYS = (
+    'BILIBILI_COOKIE',
+    'DINGTALK_WEBHOOK',
+    'DINGTALK_SECRET',
+    'OUTBOUND_PROXY_URL',
+)
+_ENC_PREFIX = 'enc:'
 ENV_OUTPUT_ORDER = (
     'APP_NAME',
     'APP_ENV',
@@ -195,23 +205,43 @@ class AppEnvService:
             if not stripped or stripped.startswith('#') or '=' not in stripped:
                 continue
             key, value = stripped.split('=', 1)
-            values[key.strip()] = value.strip()
+            key = key.strip()
+            value = value.strip()
+            if key in SENSITIVE_KEYS and value.startswith(_ENC_PREFIX):
+                # 启用加密时还原明文;如果 key 已丢失,
+                # ``decrypt_text`` 会透传原值并保证向后兼容。
+                value = config_encryption.decrypt_text(value[len(_ENC_PREFIX):])
+            values[key] = value
         return values
 
     def _write_values(self, values: dict[str, str]) -> None:
         self.env_file.parent.mkdir(parents=True, exist_ok=True)
+        # REQ-SEC-001: 启用加密时对敏感字段加『enc:』前缀后落盘;未启用时透传明文。
+        encryption_enabled = config_encryption.get_status().enabled
+        encoded: dict[str, str] = {}
+        for key, raw_value in values.items():
+            if (
+                encryption_enabled
+                and key in SENSITIVE_KEYS
+                and raw_value
+                and not raw_value.startswith(_ENC_PREFIX)
+            ):
+                encoded[key] = _ENC_PREFIX + config_encryption.encrypt_text(raw_value)
+            else:
+                encoded[key] = raw_value
+
         lines: list[str] = []
         emitted: set[str] = set()
 
         for key in ENV_OUTPUT_ORDER:
-            if key in values:
-                lines.append(f'{key}={values[key]}')
+            if key in encoded:
+                lines.append(f'{key}={encoded[key]}')
                 emitted.add(key)
 
-        for key in sorted(values):
+        for key in sorted(encoded):
             if key in emitted:
                 continue
-            lines.append(f'{key}={values[key]}')
+            lines.append(f'{key}={encoded[key]}')
 
         if not lines:
             for key in MANAGED_KEYS:

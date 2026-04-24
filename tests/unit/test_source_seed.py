@@ -67,7 +67,7 @@ def test_create_app_runs_schema_init_in_lifespan_not_constructor(tmp_path, monke
     assert len(calls) == 1
 
 
-def test_seed_default_sources_inserts_three_records_on_empty_database(tmp_path, monkeypatch) -> None:
+def test_seed_default_sources_inserts_two_records_on_empty_database(tmp_path, monkeypatch) -> None:
     session_factory = setup_database(tmp_path, "seed-defaults.db", monkeypatch)
 
     with session_factory() as session:
@@ -76,16 +76,13 @@ def test_seed_default_sources_inserts_three_records_on_empty_database(tmp_path, 
         sources = list(session.scalars(select(Source)).all())
 
     source_map = {source.name: source for source in sources}
-    assert set(source_map) == {"YouTube-ElectronicArts", "YouTube-EpicGames", "B站-游戏-今日搜索"}
+    assert set(source_map) == {"YouTube-ElectronicArts", "YouTube-EpicGames"}
     assert source_map["YouTube-ElectronicArts"].entry_url == "https://www.youtube.com/@ElectronicArts"
     assert source_map["YouTube-ElectronicArts"].collection_strategy == "youtube_channel_recent"
     assert source_map["YouTube-ElectronicArts"].search_keyword is None
     assert source_map["YouTube-EpicGames"].entry_url == "https://www.youtube.com/@EpicGamesStore"
     assert source_map["YouTube-EpicGames"].collection_strategy == "youtube_channel_recent"
     assert source_map["YouTube-EpicGames"].search_keyword is None
-    assert source_map["B站-游戏-今日搜索"].entry_url == "https://www.bilibili.com/"
-    assert source_map["B站-游戏-今日搜索"].collection_strategy == "bilibili_site_search"
-    assert source_map["B站-游戏-今日搜索"].search_keyword == "游戏"
 
 
 def test_seed_default_sources_is_idempotent(tmp_path, monkeypatch) -> None:
@@ -97,7 +94,7 @@ def test_seed_default_sources_is_idempotent(tmp_path, monkeypatch) -> None:
         service.seed_default_sources()
         source_count = session.scalar(select(func.count()).select_from(Source))
 
-    assert source_count == 3
+    assert source_count == 2
 
 
 def test_seed_default_sources_does_not_override_existing_source_with_same_name(tmp_path, monkeypatch) -> None:
@@ -129,7 +126,7 @@ def test_seed_default_sources_does_not_override_existing_source_with_same_name(t
         source_count = session.scalar(select(func.count()).select_from(Source))
         preserved = session.get(Source, existing.id)
 
-    assert source_count == 3
+    assert source_count == 2
     assert preserved is not None
     assert preserved.entry_url == "https://example.com/custom"
     assert preserved.fetch_mode == "http"
@@ -183,7 +180,7 @@ def test_create_app_upgrades_legacy_sqlite_sources_table_during_startup(tmp_path
         "collection_strategy",
         "search_keyword",
     }.issubset(columns)
-    assert source_count == 3
+    assert source_count == 2
 
 def test_seed_default_sources_updates_legacy_epicgames_url(tmp_path, monkeypatch) -> None:
     session_factory = setup_database(tmp_path, "seed-legacy-epicgames.db", monkeypatch)
@@ -208,3 +205,31 @@ def test_seed_default_sources_updates_legacy_epicgames_url(tmp_path, monkeypatch
 
     assert source is not None
     assert source.entry_url == "https://www.youtube.com/@EpicGamesStore"
+
+
+def test_seed_default_sources_removes_legacy_bilibili_default_source(tmp_path, monkeypatch) -> None:
+    session_factory = setup_database(tmp_path, "seed-legacy-bilibili.db", monkeypatch)
+
+    with session_factory() as session:
+        service = SourceService(session)
+        legacy_source = service.create_source(
+            SourceCreate(
+                name="B站-游戏-今日搜索",
+                site_name="Bilibili",
+                entry_url="https://www.bilibili.com/",
+                fetch_mode="playwright",
+                max_items=30,
+                enabled=True,
+                source_group="domestic",
+                collection_strategy="bilibili_site_search",
+                search_keyword="游戏",
+            )
+        )
+
+        created_count = service.seed_default_sources()
+        source_count = session.scalar(select(func.count()).select_from(Source))
+        removed_source = session.get(Source, legacy_source.id)
+
+    assert created_count == 2
+    assert source_count == 2
+    assert removed_source is None

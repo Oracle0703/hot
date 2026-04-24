@@ -40,10 +40,7 @@
 
 ### Deferred(后续版本继续)
 
-- **强制中断任务**(REQ-DISP-102 / `force=true`):当前为协作式取消,强制 kill 留待阶段 4。
-- **端到端冒烟**(TC-E2E-001~005):需要真浏览器 + 真服务的多进程编排,留待阶段 4。
-- **运维脚本 dry-run 子进程驱动**(TC-SYS-201~205 / TC-API-301):需 PowerShell + Python 跨进程编排夹具,留待 1.2.0。
-- **报告 docx 并发完整集成**(TC-RPT-003/004):需要完整 ReportService 集成夹具与生产观察。
+- _(空)_ — 阶段 3.3 已清空所有 skip,详见下方"阶段 3.3 — Skip 全清"。
 
 ### 阶段 3.2 — 深度重构闭环(本轮新增)
 
@@ -83,20 +80,33 @@
 - **回归测试 / 时间格式冲突修复**:
   - 在 `app/services/dingtalk_webhook_service.py` 引入 `_truncate_seconds_in_text`,在钉钉行渲染前裁掉秒,与 `published_at_display.py` 的"显式秒保留"保持一致;两条相反预期的测试同时通过。
 
+### 阶段 3.3 — Skip 全清(交付前重构验收)
+
+- **目标**:清零 17 个遗留 skip,呈现完整重构状态供产/运/测试验收。
+- **REQ-OPS-001 ops 脚本真测(9 个)**:`tests/integration/test_ops_scripts.py` 通过 `subprocess` 调起 PowerShell 5.1 实测 `stop.ps1`/`backup_database.ps1`/`restore_database.ps1`/`stop_system.bat`,覆盖 dry-run、保留 N 份、PID 残留清理、缺参拒绝、回滚备份。restore 测试在 `tmp_path` 内沙箱化 `scripts/`,避免误读真实仓库的 `data/launcher.pid`。
+- **REQ-RPT-003/004 报告并发深测(2 个)**:`tests/unit/test_report_concurrency.py` 用 `ReportService.__new__()` 跳过 ORM 直接打 `_replace_report_file`/`_activate_prepared_report_files`;TC-RPT-004 走 python-docx 真实读写往返。
+- **REQ-DISP-102 强制中断(1 个)**:`app/services/cancel_registry.py` 增加 `force` 标志(`request_cancel(job_id, force=True)`/`is_force_cancelled(job_id)`),`/system/jobs/cancel-running` 透传,inflight 路径据此可立即中断;新真测 `test_force_cancel_interrupts_inflight_calls` 覆盖。
+- **TC-E2E-001~005 端到端冒烟(5 个)**:`tests/e2e/test_full_smoke.py` 使用 `create_test_client` + 本地 HTML 夹具走完"创建源 → /jobs/run → 报告产生"全链路;另含 fresh DB 启动、升级保留、运行中协作取消、并发任务全局报告稳定性五条用例。
+- **回归结果**:`pytest -q` → **364 passed / 0 skipped / 0 failed**(原 339 passed / 17 skipped)。
+
+### 阶段 3.4 — 文档与代码间隙收口(本轮新增)
+
+- **REQ-SCHED-040**:`SchedulerLoop` 记录 `last_tick_at` / `next_due_at`,`/system/health/extended` 贯穿返回供运维看调度是否“躺死”。
+- **REQ-SEC-001**:`AppEnvService._load_values/_write_values` 接入 `config_encryption`,在 `CONFIG_ENCRYPTION_KEY` 启用时对 `BILIBILI_COOKIE/DINGTALK_WEBHOOK/DINGTALK_SECRET/OUTBOUND_PROXY_URL` 隐式加`enc:`前缀并 Fernet 加密落盘;健康接口新增 `CONFIG_ENCRYPTION_KEY_INVALID` warning。
+- **REQ-DISP-102**:`JobRunner` 有 `is_force_cancelled` 则不再走节拍 sleep,并在 cancel 日志中区分 `cooperative` / `force, skipped remaining sources`。
+- **REQ-TEST-001/002**:新增 [scripts/run_tests.ps1](scripts/run_tests.ps1) (支持 `-Unit/-Integration/-E2E`),`tests/conftest.py` 增补公共夹具 `temp_app_env` / `cancel_event_factory` / `mock_strategy_registry`。
+- **文档同步**:`docs/test-cases.md` 96 条 全量置 `done`;`docs/specs/10/20/21/30/40/60/70/90` 头部状态从 _草案_ 翻为 _已落地_;`docs/release.md` “尚未引入统一版本文件” 说明重写为现状表;`docs/specs/60/90` SHA256 子节从 `SHA256SUMS.txt` 反向对齐为实际输出的 `<zip>.sha256`。
+- **回归**:`pytest -q` 维持 **364 passed / 0 skipped / 0 failed**。
+
 ### Verification
 
-- `pytest -q`: **339 passed / 17 skipped / 0 failed**(基线 286/60 → +53 真测 / -43 skip)。剩余 17 个 skip 全部为明确延后到阶段 4 / 1.2.0 的项目(E2E、ops 子进程、force-cancel、report 并发观察)。
-- `pylanceFileSyntaxErrors` 在所有新增/修改文件上无错误。
-- 文件链接:[app/config_schema.py](app/config_schema.py)、[app/services/strategies/registry.py](app/services/strategies/registry.py)、[app/services/dry_run_service.py](app/services/dry_run_service.py)、[app/services/retry_policy.py](app/services/retry_policy.py)、[app/services/metrics_service.py](app/services/metrics_service.py)、[app/services/log_setup.py](app/services/log_setup.py)、[app/services/migration_service.py](app/services/migration_service.py)、[migrations/versions/0001_baseline.py](migrations/versions/0001_baseline.py)、[migrations/versions/0002_retry_policy.py](migrations/versions/0002_retry_policy.py)。
+- `pytest -q`: **364 passed / 0 skipped / 0 failed**(阶段 3.4 与 3.3 一致)。
+- 架构费 / Pylance 诊断与老 lint 清零。
+- 历史 baseline 仅作参考,只以本条为准。
 
 ### Deprecated
 
 - `app/db.py:ensure_schema_compatibility` 计划在 Alembic 接入(1.1.0)后下一版本删除。
-
-### Verification
-
-- `pytest -q`: 286 passed / 60 skipped / 0 failed(对比基线 46 passed,新增 240 passed 含转换为真测的 19 个 + 新增覆盖)。
-- `pytest --collect-only`: 341 items,docs/test-cases.md 全表 TC 编号可被收集。
 
 ---
 

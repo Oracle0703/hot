@@ -1,6 +1,6 @@
 # 90 发布与升级
 
-状态：草案（阶段 4 落地 SHA256 + VERSION 注入）
+状态：已落地（zip + 同名 .sha256 + version_service 自检）
 
 ## 90.1 发布形态
 
@@ -25,12 +25,13 @@ channel=offline|upgrade|dev
 
 ## 90.3 完整性（REQ-SEC-020）
 
-发布脚本在产出 zip 后生成 `SHA256SUMS.txt`：
+发布脚本在产出 zip 后生成同名 `<zip>.sha256`(单行)：
 
 ```
 <sha256>  HotCollector-Offline-20260423-102231.zip
-<sha256>  HotCollector-Upgrade-20260423-102231.zip
 ```
+
+升级包同理：`HotCollector-Upgrade-20260423-102231.zip.sha256`。
 
 运维同学覆盖前用 `Get-FileHash -Algorithm SHA256 <file>` 比对。
 

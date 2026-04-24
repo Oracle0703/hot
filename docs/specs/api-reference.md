@@ -62,4 +62,4 @@
 
 ## 采集源、任务、报告
 
-详见 `app/api/routes_sources.py`、`routes_jobs.py`、`routes_reports.py` 与 [../specs/20-collection-strategies.md](specs/20-collection-strategies.md)。本节随阶段 3 落地后补全。
+详见 `app/api/routes_sources.py`、`routes_jobs.py`、`routes_reports.py` 与 [../specs/20-collection-strategies.md](20-collection-strategies.md)。本节随阶段 3 落地后补全。

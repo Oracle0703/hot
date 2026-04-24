@@ -18,17 +18,25 @@ from uuid import UUID
 
 _lock = threading.Lock()
 _pending: dict[str, datetime] = {}
+_force_pending: set[str] = set()
 
 
 def _key(job_id: UUID | str) -> str:
     return str(job_id)
 
 
-def request_cancel(job_id: UUID | str) -> datetime:
-    """登记一次取消请求,返回时间戳。重复请求使用最新时间戳。"""
+def request_cancel(job_id: UUID | str, *, force: bool = False) -> datetime:
+    """登记一次取消请求,返回时间戳。重复请求使用最新时间戳。
+
+    ``force=True`` 同时置位 force-pending 标志,JobRunner 与正在 inflight 的
+    可取消调用可通过 ``is_force_cancelled(job_id)`` 检测后立刻中断当前 source,
+    无需等待该 source 自然结束。
+    """
     now = datetime.now(timezone.utc)
     with _lock:
         _pending[_key(job_id)] = now
+        if force:
+            _force_pending.add(_key(job_id))
     return now
 
 
@@ -37,16 +45,24 @@ def is_cancelled(job_id: UUID | str) -> bool:
         return _key(job_id) in _pending
 
 
+def is_force_cancelled(job_id: UUID | str) -> bool:
+    with _lock:
+        return _key(job_id) in _force_pending
+
+
 def consume(job_id: UUID | str) -> bool:
     """JobRunner 完成 cancel 处理后调用,返回是否真的存在 pending。"""
     with _lock:
-        return _pending.pop(_key(job_id), None) is not None
+        existed = _pending.pop(_key(job_id), None) is not None
+        _force_pending.discard(_key(job_id))
+        return existed
 
 
 def clear() -> None:
     """测试夹具用。"""
     with _lock:
         _pending.clear()
+        _force_pending.clear()
 
 
 def pending_job_ids() -> Iterable[str]:

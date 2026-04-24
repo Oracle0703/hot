@@ -10,7 +10,7 @@ import httpx
 import portalocker
 from docx import Document
 from docx.shared import Inches
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.db import get_reports_root
@@ -24,11 +24,12 @@ from app.services.published_at_display import format_published_at
 
 
 class ReportService:
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, reports_root: Path | None = None) -> None:
         self.session = session
+        self.reports_root = reports_root or get_reports_root()
 
     def generate_for_job(self, job: CollectionJob, source_runs: list[dict[str, object]]) -> Report:
-        report_dir = get_reports_root() / "global"
+        report_dir = self.reports_root / "global"
         report_dir.mkdir(parents=True, exist_ok=True)
         markdown_path = report_dir / "hot-report.md"
         docx_path = report_dir / "hot-report.docx"
@@ -77,6 +78,11 @@ class ReportService:
 
     def read_markdown(self, report: Report) -> str:
         return Path(report.markdown_path).read_text(encoding="utf-8")
+
+    def clear_collected_items(self) -> int:
+        result = self.session.execute(delete(CollectedItem))
+        self.session.commit()
+        return int(result.rowcount or 0)
 
     def _upsert_collected_items(self, job: CollectionJob, source_runs: list[dict[str, object]]) -> None:
         seen_at = job.finished_at or datetime.utcnow()
@@ -490,5 +496,3 @@ class ReportService:
             for log in logs
             if log.level == "error" and log.source_id is not None
         }
-
-

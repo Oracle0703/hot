@@ -63,7 +63,7 @@ def test_cancel_running_job_returns_no_running_when_idle(tmp_path) -> None:
 
 
 def test_config_export_default_masks_sensitive_fields(tmp_path, monkeypatch) -> None:
-    """TC-API-006: GET /system/config/export?mask=true 默认脱敏，内容不含真实 Cookie/Secret"""
+    """TC-CFG-105 / TC-API-006: GET /system/config/export?mask=true 默认脱敏，内容不含真实 Cookie/Secret"""
     monkeypatch.setenv("BILIBILI_COOKIE", "SESSDATA=verysecretvalue1234567890")
     monkeypatch.setenv("DINGTALK_SECRET", "shortsec")
     client = create_test_client(make_sqlite_url(tmp_path))
@@ -79,7 +79,7 @@ def test_config_export_default_masks_sensitive_fields(tmp_path, monkeypatch) -> 
 
 
 def test_config_export_unmasked_in_production_forbidden(tmp_path, monkeypatch) -> None:
-    """TC-API-007: GET /system/config/export?mask=false 在 APP_DEBUG=false 时返回 403"""
+    """TC-CFG-106 / TC-API-007: GET /system/config/export?mask=false 在 APP_DEBUG=false 时返回 403"""
     monkeypatch.setenv("APP_DEBUG", "false")
     client = create_test_client(make_sqlite_url(tmp_path))
 

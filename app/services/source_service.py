@@ -13,6 +13,15 @@ from app.schemas.source import SourceCreate, SourceUpdate
 
 
 _LEGACY_EPICGAMES_URL = 'https://www.youtube.com/@EpicGames'
+_LEGACY_BILIBILI_DEFAULT_SOURCE = {
+    'name': 'B站-游戏-今日搜索',
+    'site_name': 'Bilibili',
+    'entry_url': 'https://www.bilibili.com/',
+    'fetch_mode': 'playwright',
+    'source_group': 'domestic',
+    'collection_strategy': 'bilibili_site_search',
+    'search_keyword': '游戏',
+}
 _DEFAULT_SOURCE_ROWS: tuple[dict[str, object], ...] = (
     {
         'name': 'YouTube-ElectronicArts',
@@ -29,15 +38,6 @@ _DEFAULT_SOURCE_ROWS: tuple[dict[str, object], ...] = (
         'fetch_mode': 'playwright',
         'source_group': 'overseas',
         'collection_strategy': 'youtube_channel_recent',
-    },
-    {
-        'name': 'B站-游戏-今日搜索',
-        'site_name': 'Bilibili',
-        'entry_url': 'https://www.bilibili.com/',
-        'fetch_mode': 'playwright',
-        'source_group': 'domestic',
-        'collection_strategy': 'bilibili_site_search',
-        'search_keyword': '游戏',
     },
 )
 
@@ -118,6 +118,8 @@ class SourceService:
         return True
 
     def seed_default_sources(self) -> int:
+        self._remove_legacy_bilibili_seeded_source()
+
         default_names = [str(item['name']) for item in _DEFAULT_SOURCE_ROWS]
         existing_names = set(
             self.session.scalars(select(Source.name).where(Source.name.in_(default_names))).all()
@@ -146,6 +148,28 @@ class SourceService:
             created_count += 1
 
         return created_count
+
+    def _remove_legacy_bilibili_seeded_source(self) -> None:
+        source = self.session.scalar(
+            select(Source).where(Source.name == str(_LEGACY_BILIBILI_DEFAULT_SOURCE['name']))
+        )
+        if source is None:
+            return
+        if source.site_name != _LEGACY_BILIBILI_DEFAULT_SOURCE['site_name']:
+            return
+        if source.entry_url != _LEGACY_BILIBILI_DEFAULT_SOURCE['entry_url']:
+            return
+        if source.fetch_mode != _LEGACY_BILIBILI_DEFAULT_SOURCE['fetch_mode']:
+            return
+        if source.source_group != _LEGACY_BILIBILI_DEFAULT_SOURCE['source_group']:
+            return
+        if getattr(source, 'collection_strategy', None) != _LEGACY_BILIBILI_DEFAULT_SOURCE['collection_strategy']:
+            return
+        if getattr(source, 'search_keyword', None) != _LEGACY_BILIBILI_DEFAULT_SOURCE['search_keyword']:
+            return
+
+        source_id = str(source.id)
+        self.delete_source(source_id)
 
     def _upgrade_legacy_seeded_source(self, name: str, payload: dict[str, object]) -> None:
         if name != 'YouTube-EpicGames':

@@ -67,12 +67,16 @@ def _settings_to_dict() -> dict[str, Any]:
 def _scheduler_state(request: Request) -> dict[str, Any]:
     scheduler_loop = getattr(request.app.state, "scheduler_loop", None)
     if scheduler_loop is None:
-        return {"alive": False, "enabled": False}
+        return {"alive": False, "enabled": False, "last_tick_at": None, "next_due_at": None}
     thread = getattr(scheduler_loop, "_thread", None)
+    last_tick = getattr(scheduler_loop, "last_tick_at", None)
+    next_due = getattr(scheduler_loop, "next_due_at", None)
     return {
         "alive": bool(thread and thread.is_alive()),
         "enabled": True,
         "poll_interval_seconds": scheduler_loop.poll_interval_seconds,
+        "last_tick_at": last_tick.isoformat() if last_tick else None,
+        "next_due_at": next_due.isoformat() if next_due else None,
     }
 
 
@@ -138,6 +142,11 @@ def system_health_extended(request: Request, response: Response) -> dict[str, An
         issues.append({"code": "SCHEDULER_NOT_RUNNING", "severity": "error", "message": "scheduler thread not alive"})
     if 0 <= disk_free < 200:
         issues.append({"code": "DISK_LOW", "severity": "warn", "message": f"data dir free {disk_free} MB"})
+    # REQ-SEC-001: KEY 设置但格式非法时升 warning;未设置则保持静默(回退明文是显式策略)。
+    from app.services import config_encryption as _ce
+    enc_status = _ce.get_status()
+    if not enc_status.enabled and enc_status.reason == "CONFIG_ENCRYPTION_KEY_INVALID":
+        issues.append({"code": "CONFIG_ENCRYPTION_KEY_INVALID", "severity": "warn", "message": "Fernet key 非法,敏感配置回退明文"})
 
     payload = {
         "status": "ok" if not any(item["severity"] == "error" for item in issues) else "error",
@@ -167,9 +176,9 @@ def cancel_running_job(payload: dict[str, Any] | None = None) -> dict[str, Any]:
             "reason": "already_cancelled",
         }
 
-    requested_at = cancel_registry.request_cancel(job_id)
-    # 协作式取消：JobRunner 在下一个 source 边界检测到后跳出，最终状态为 cancelled。
-    # force=true 预留为阶段 4 的强制中断选项，本期徽章仅在响应中回传。
+    requested_at = cancel_registry.request_cancel(job_id, force=force)
+    # 协作式取消:JobRunner 在下一个 source 边界检测到后跳出,最终状态为 cancelled。
+    # force=true 同时置位 force-pending,正在 inflight 的可取消任务亦能立刻中断。
     return {
         "cancelled_job_id": job_id,
         "force": force,

@@ -96,6 +96,17 @@ def test_consume_returns_true_only_once() -> None:
     assert cancel_registry.consume(job_id) is False
 
 
-@pytest.mark.skip(reason="TC-DISP-102 强制中断 (force=true) 留待阶段 4")
 def test_force_cancel_interrupts_inflight_calls() -> None:
-    pass
+    """TC-DISP-102: force=true 后 is_force_cancelled 立即返回 True,
+    模拟正在 inflight 的可取消任务可据此中断。"""
+    from uuid import uuid4
+
+    cancel_registry.clear()
+    job_id = uuid4()
+    cancel_registry.request_cancel(job_id, force=True)
+    assert cancel_registry.is_cancelled(job_id) is True
+    assert cancel_registry.is_force_cancelled(job_id) is True
+    # consume 后两个标志一起清掉
+    assert cancel_registry.consume(job_id) is True
+    assert cancel_registry.is_cancelled(job_id) is False
+    assert cancel_registry.is_force_cancelled(job_id) is False

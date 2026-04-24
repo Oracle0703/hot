@@ -45,3 +45,15 @@ def test_dry_run_includes_diagnostics() -> None:
         assert key in diag, key
     # 截断后不超过 5
     assert len(result.items) <= DEFAULT_DRY_RUN_LIMIT
+
+
+def test_dry_run_reports_zero_hits_for_wrong_selector() -> None:
+    """TC-STRAT-102"""
+    src = _FakeSource(list_selector=".missing")
+    service = DryRunService(fetcher=lambda s: _make_html(3))
+
+    result = service.dry_run(src)
+
+    assert result.items == []
+    assert result.diagnostics["list_hits"] == 0
+    assert result.diagnostics["title_hits"] == 0

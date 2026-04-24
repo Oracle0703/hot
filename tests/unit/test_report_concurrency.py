@@ -73,11 +73,50 @@ def test_lock_timeout_raises(tmp_path) -> None:
     holder.join(timeout=5)
 
 
-@pytest.mark.skip(reason="TC-RPT-003 临时文件保留待生产观察后落实")
-def test_temp_file_kept_on_failure() -> None:
-    pass
+def test_temp_file_kept_on_failure(tmp_path) -> None:
+    """TC-RPT-003: _replace_report_file 失败时 .bak 仍能把目标文件恢复回原内容。"""
+    from app.services.report_service import ReportService
+
+    target = tmp_path / "hot-report.md"
+    target.write_text("ORIGINAL", encoding="utf-8")
+    backup = tmp_path / "hot-report.md.bak"
+    temp_path = tmp_path / ".hot-report.md.tmp"
+    # 不创建 temp_path -> .replace 会抛 FileNotFoundError 并触发 .bak 还原
+    svc = ReportService.__new__(ReportService)
+    with pytest.raises(FileNotFoundError):
+        svc._replace_report_file(target, temp_path, backup)
+    assert target.exists()
+    assert target.read_text(encoding="utf-8") == "ORIGINAL"
 
 
-@pytest.mark.skip(reason="TC-RPT-004 docx 并发后可被 python-docx 打开 — 需完整 ReportService 集成夹具")
-def test_docx_atomic_replace() -> None:
-    pass
+def test_docx_atomic_replace(tmp_path) -> None:
+    """TC-RPT-004: 经 _activate_prepared_report_files 切换后,docx 仍能被 python-docx 重新打开。"""
+    from docx import Document
+
+    from app.services.report_service import ReportService
+
+    md_target = tmp_path / "hot-report.md"
+    docx_target = tmp_path / "hot-report.docx"
+    md_temp = tmp_path / ".hot-report.md.tmp"
+    docx_temp = tmp_path / ".hot-report.docx.tmp"
+
+    md_temp.write_text("# title\n", encoding="utf-8")
+    doc = Document()
+    doc.add_paragraph("hello concurrent world")
+    doc.save(str(docx_temp))
+
+    backup_paths = {
+        md_target: md_target.with_name(md_target.name + ".bak"),
+        docx_target: docx_target.with_name(docx_target.name + ".bak"),
+    }
+    svc = ReportService.__new__(ReportService)
+    svc._activate_prepared_report_files(
+        markdown_path=md_target,
+        markdown_temp_path=md_temp,
+        docx_path=docx_target,
+        docx_temp_path=docx_temp,
+        backup_paths=backup_paths,
+    )
+    assert md_target.read_text(encoding="utf-8").startswith("# title")
+    reopened = Document(str(docx_target))
+    assert any("hello concurrent" in p.text for p in reopened.paragraphs)

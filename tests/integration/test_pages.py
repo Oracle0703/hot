@@ -38,6 +38,15 @@ def test_index_page_shows_dashboard_actions(tmp_path) -> None:
     assert "热点信息采集系统" in response.text
     assert "app-shell" in response.text
     assert "page-hero" in response.text
+    assert "dashboard-status-bar" in response.text
+    assert "dashboard-main-grid" in response.text
+    assert "compact-quick-links" in response.text
+    assert "dashboard-primary-panel" in response.text
+    assert "dashboard-secondary-panel" in response.text
+    assert "dashboard-featured-card" in response.text
+    assert "dashboard-primary-actions" in response.text
+    assert "dashboard-secondary-actions" in response.text
+    assert "dashboard-empty-schedule-hint" in response.text
     assert "stat-card" in response.text
     assert "热点信号总览" in response.text
     assert "最近任务结果" in response.text
@@ -45,6 +54,7 @@ def test_index_page_shows_dashboard_actions(tmp_path) -> None:
     assert "recent-jobs" in response.text
     assert "recent-jobs-timeline" in response.text
     assert "quick-actions" in response.text
+    assert "system-status-panel" not in response.text
     assert "立即采集国内" in response.text
     assert "立即采集国外" in response.text
     assert "按调度分组运行" in response.text
@@ -333,6 +343,10 @@ def test_source_edit_page_shows_common_edit_fields(tmp_path) -> None:
     assert "name='schedule_group'" in response.text
     assert "name='max_items'" in response.text
     assert "name='enabled'" in response.text
+    assert "source-config-grid" in response.text
+    assert "source-field-full" in response.text
+    assert "source-actions-row" in response.text
+    assert "国内用于“立即采集国内”，国外用于“立即采集国外”" in response.text
     assert "name='fetch_mode'" not in response.text
     assert "name='list_selector'" not in response.text
 
@@ -466,6 +480,16 @@ def test_new_source_page_shows_simplified_source_form_fields(tmp_path) -> None:
     assert "name='source_group'" in response.text
     assert "name='schedule_group'" in response.text
     assert "name='max_items'" in response.text
+    assert "当前支持平台：Bilibili / X / YouTube" in response.text
+    assert "class='form-control'" in response.text
+    assert "source-config-grid" in response.text
+    assert "source-field-full" in response.text
+    assert "source-actions-row" in response.text
+    assert "source-wizard" in response.text
+    assert "第 1 步" in response.text
+    assert "第 2 步" in response.text
+    assert "<option value='domestic' selected>国内</option>" in response.text
+    assert "国内用于“立即采集国内”，国外用于“立即采集国外”" in response.text
     assert "https://space.bilibili.com/20411266" in response.text
     assert "name='name'" not in response.text
     assert "name='list_selector'" not in response.text

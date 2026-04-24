@@ -169,3 +169,18 @@ def test_self_check_dingtalk_fails_when_mock_returns_401() -> None:
     assert result["ok"] is False
     assert result["status"] == 401
     assert "401" in result["reason"]
+
+
+def test_schema_reports_multiple_field_errors(monkeypatch) -> None:
+    """TC-CFG-107"""
+    monkeypatch.setenv("APP_DEBUG", "maybe")
+    monkeypatch.setenv("SCHEDULER_POLL_SECONDS", "not-a-number")
+    monkeypatch.setenv("DINGTALK_WEBHOOK", "ftp://example.com/hook")
+
+    with pytest.raises(ValidationError) as exc_info:
+        SettingsSchema()
+
+    error_fields = {tuple(err["loc"]) for err in exc_info.value.errors()}
+    assert ("APP_DEBUG",) in error_fields or ("debug",) in error_fields
+    assert ("SCHEDULER_POLL_SECONDS",) in error_fields or ("scheduler_poll_seconds",) in error_fields
+    assert ("DINGTALK_WEBHOOK",) in error_fields or ("dingtalk_webhook",) in error_fields

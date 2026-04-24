@@ -33,6 +33,7 @@ def test_app_env_service_updates_dingtalk_settings_and_writes_env_file(tmp_path,
 
 
 def test_app_env_service_reads_bom_prefixed_env_file(tmp_path, monkeypatch) -> None:
+    """TC-CFG-101: 已存在的 app.env 能被读取并返回持久化值"""
     env_file = tmp_path / 'data' / 'app.env'
     env_file.parent.mkdir(parents=True, exist_ok=True)
     env_file.write_text(
@@ -209,7 +210,7 @@ def test_app_env_service_reads_fetch_interval_settings_from_env_file(tmp_path, m
 
 
 def test_app_env_service_concurrent_writes_do_not_corrupt_file(tmp_path, monkeypatch) -> None:
-    """TC-CFG-101: 多线程并发 update_dingtalk_settings 不会因竞争丢字段或截断文件"""
+    """TC-CFG-102: 多线程并发 update_dingtalk_settings 不会因竞争丢字段或截断文件"""
     import threading
 
     env_file = tmp_path / 'data' / 'app.env'
@@ -244,3 +245,38 @@ def test_app_env_service_concurrent_writes_do_not_corrupt_file(tmp_path, monkeyp
     leftover = list(env_file.parent.glob('app.env.*.tmp'))
     assert leftover == []
 
+
+def test_app_env_service_keeps_original_file_when_atomic_replace_fails(tmp_path, monkeypatch) -> None:
+    """TC-CFG-103: os.replace 失败时主文件保持原值且无残留临时文件"""
+    env_file = tmp_path / 'data' / 'app.env'
+    env_file.parent.mkdir(parents=True, exist_ok=True)
+    env_file.write_text('DINGTALK_KEYWORD=old-value\n', encoding='utf-8')
+
+    def fail_replace(src: str, dst: Path) -> None:
+        raise OSError('replace failed')
+
+    monkeypatch.setattr('app.services.app_env_service.os.replace', fail_replace)
+
+    with pytest.raises(OSError, match='replace failed'):
+        AppEnvService(env_file=env_file).update_dingtalk_settings(
+            enabled=True,
+            webhook='https://example.com/hook',
+            secret='SECdemo',
+            keyword='new-value',
+        )
+
+    assert env_file.read_text(encoding='utf-8') == 'DINGTALK_KEYWORD=old-value\n'
+    assert list(env_file.parent.glob('app.env.*.tmp')) == []
+
+
+def test_app_env_service_ensure_env_file_creates_managed_placeholders(tmp_path) -> None:
+    """TC-CFG-104: ensure_env_file 在文件不存在时生成受管 key 占位内容"""
+    env_file = tmp_path / 'data' / 'app.env'
+
+    created = AppEnvService(env_file=env_file).ensure_env_file()
+
+    assert created == env_file
+    text = env_file.read_text(encoding='utf-8')
+    assert 'DINGTALK_WEBHOOK=' in text
+    assert 'BILIBILI_COOKIE=' in text
+    assert 'BILIBILI_RETRY_DELAY_SECONDS=' in text

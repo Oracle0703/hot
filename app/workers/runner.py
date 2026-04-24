@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
 from app.config import get_settings
+from app.db import get_reports_root
 from app.models.job import CollectionJob
 from app.models.job_log import JobLog
 from app.models.source import Source
@@ -35,6 +36,7 @@ class JobRunner:
         self.notification_scheduler = notification_scheduler or self._schedule_notification_background
         self.settings_provider = settings_provider or get_settings
         self.sleeper = sleeper or time.sleep
+        self.reports_root = get_reports_root()
 
     def run_once(self) -> UUID | None:
         with self.session_factory() as session:
@@ -70,17 +72,24 @@ class JobRunner:
             for index, source in enumerate(enabled_sources):
                 if cancel_registry.is_cancelled(job.id):
                     cancelled = True
+                    forced = cancel_registry.is_force_cancelled(job.id)
                     session.add(
                         JobLog(
                             job_id=job.id,
                             level="warning",
-                            message="job cancelled by operator (cooperative)",
+                            message=(
+                                "job cancelled by operator (force, skipped remaining sources)"
+                                if forced
+                                else "job cancelled by operator (cooperative)"
+                            ),
                         )
                     )
                     session.commit()
                     break
                 if index > 0:
-                    self._sleep_before_source(source)
+                    # force=true 跳过节拍 sleep,尽最快送到下一轮 cancel 检查并出循环。
+                    if not cancel_registry.is_force_cancelled(job.id):
+                        self._sleep_before_source(source)
                 job.current_source = source.name
                 session.commit()
 
@@ -122,7 +131,7 @@ class JobRunner:
                 job.status = "success"
 
             try:
-                report = ReportService(session).generate_for_job(job, source_runs)
+                report = ReportService(session, reports_root=self.reports_root).generate_for_job(job, source_runs)
             except Exception as exc:  # noqa: BLE001
                 session.rollback()
                 job = session.get(CollectionJob, job.id)

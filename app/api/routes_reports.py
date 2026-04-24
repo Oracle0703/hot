@@ -33,6 +33,18 @@ def _button_link(label: str, href: str, variant: str = "button-secondary") -> st
     return f"<a class='button {variant}' href='{escape(href, quote=True)}'>{escape(label)}</a>"
 
 
+def _render_clear_items_form() -> str:
+    return """
+    <form method='post' action='/reports/clear-items' class='inline-form'>
+      <button
+        class='button-danger'
+        type='submit'
+        onclick="return confirm('确认清空所有已采集内容？来源配置、任务记录和报告文件会保留。')"
+      >清空已采集内容</button>
+    </form>
+    """
+
+
 def _format_metric(value: int | None) -> str:
     return "--" if value is None else str(value)
 
@@ -192,9 +204,14 @@ def download_report(report_id: str, format: str = Query("md", pattern="^(md|docx
 
 
 @router.get("/reports", response_class=HTMLResponse)
-def reports_page(session: Session = Depends(get_db_session)) -> str:
+def reports_page(request: Request, session: Session = Depends(get_db_session)) -> str:
     service = ReportService(session)
     report = next(iter(service.list_reports(limit=1)), None)
+    cleared_count = request.query_params.get("cleared_count")
+    cleared_message = ""
+    if request.query_params.get("cleared") == "1":
+        count_text = f" {escape(cleared_count)} 条" if cleared_count and cleared_count.isdigit() else ""
+        cleared_message = f"<p class='helper-note'>已清空{count_text}已采集内容，可重新执行爬取测试。</p>"
 
     if report is None:
         report_content = "<div class='empty-state'>暂无报告，先返回首页执行一次采集即可生成首份总报告。</div>"
@@ -208,6 +225,17 @@ def reports_page(session: Session = Depends(get_db_session)) -> str:
         </div>
         """
 
+    report_content += f"""
+    {cleared_message}
+    <div class='danger-zone'>
+      <div>
+        <strong>测试工具：清空已采集内容</strong>
+        <p class='helper-note'>仅删除已爬取到的内容，来源配置、任务记录、报告下载入口会保留。</p>
+      </div>
+      {_render_clear_items_form()}
+    </div>
+    """
+
     content = (
         render_page_header(
             eyebrow='Reports',
@@ -218,6 +246,12 @@ def reports_page(session: Session = Depends(get_db_session)) -> str:
         + render_panel(GLOBAL_REPORT_TITLE, report_content, extra_class='reports-overview-panel')
     )
     return render_page(title=REPORTS_TITLE, content=content, body_class='theme-dark')
+
+
+@router.post("/reports/clear-items")
+async def clear_report_items(session: Session = Depends(get_db_session)) -> RedirectResponse:
+    deleted_count = ReportService(session).clear_collected_items()
+    return RedirectResponse(url=f"/reports?cleared=1&cleared_count={deleted_count}", status_code=303)
 
 
 @router.get("/weekly", response_class=HTMLResponse)

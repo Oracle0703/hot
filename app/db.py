@@ -31,6 +31,7 @@ _SQLITE_LEGACY_SOURCE_COLUMN_PATCHES: tuple[tuple[str, str], ...] = (
     ("source_group", "ALTER TABLE sources ADD COLUMN source_group VARCHAR(20)"),
     ("schedule_group", "ALTER TABLE sources ADD COLUMN schedule_group VARCHAR(100)"),
     ("search_keyword", "ALTER TABLE sources ADD COLUMN search_keyword VARCHAR(200)"),
+    ("retry_policy", "ALTER TABLE sources ADD COLUMN retry_policy JSON"),
 )
 
 

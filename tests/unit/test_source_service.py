@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.db import create_session_factory, get_engine
+from sqlalchemy import create_engine, inspect, text
+
+from app.db import create_session_factory, ensure_schema_compatibility, get_engine
 from app.models.base import Base
 from app.models.source import Source
 from app.services.source_service import SourceService
@@ -91,3 +93,41 @@ def test_source_service_gets_source_by_id(tmp_path) -> None:
         assert source is not None
         assert source.id == created.id
         assert source.name == "国内来源"
+
+
+def test_ensure_schema_compatibility_adds_retry_policy_column_for_legacy_sources_table(tmp_path) -> None:
+    url = make_database_url(tmp_path, "legacy-source-schema.db")
+    engine = create_engine(url, future=True)
+
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE sources (
+                    id CHAR(32) PRIMARY KEY,
+                    name VARCHAR(100) NOT NULL,
+                    site_name VARCHAR(100),
+                    entry_url TEXT NOT NULL,
+                    fetch_mode VARCHAR(20) NOT NULL,
+                    parser_type VARCHAR(50),
+                    list_selector VARCHAR(200),
+                    title_selector VARCHAR(200),
+                    link_selector VARCHAR(200),
+                    meta_selector VARCHAR(200),
+                    include_keywords JSON NOT NULL DEFAULT '[]',
+                    exclude_keywords JSON NOT NULL DEFAULT '[]',
+                    max_items INTEGER NOT NULL DEFAULT 30,
+                    enabled BOOLEAN NOT NULL DEFAULT 1,
+                    source_group VARCHAR(20),
+                    schedule_group VARCHAR(100),
+                    collection_strategy VARCHAR(50) NOT NULL DEFAULT 'generic_css',
+                    search_keyword VARCHAR(200)
+                )
+                """
+            )
+        )
+
+    ensure_schema_compatibility(engine)
+
+    columns = {column["name"] for column in inspect(engine).get_columns("sources")}
+    assert "retry_policy" in columns

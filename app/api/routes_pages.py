@@ -342,41 +342,42 @@ def _render_source_edit_page(source, *, error: str | None = None) -> str:
     form = f"""
     <form method='post' action='/sources/{source.id}' class='scheduler-form scheduler-settings-panel'>
       {error_html}
-      <div class='field-grid'>
-        <label class='field'>
+      <div class='field-grid source-config-grid'>
+        <label class='field source-field-full'>
           <span class='label'>名称</span>
-          <input name='name' value='{escape(str(source.name), quote=True)}' />
+          <input class='form-control' name='name' value='{escape(str(source.name), quote=True)}' />
         </label>
-        <label class='field'>
+        <label class='field source-field-full'>
           <span class='label'>入口 URL</span>
-          <input name='entry_url' value='{escape(str(source.entry_url), quote=True)}' />
+          <input class='form-control' name='entry_url' value='{escape(str(source.entry_url), quote=True)}' />
         </label>
         <label class='field'>
           <span class='label'>关键词</span>
-          <input name='search_keyword' value='{escape(search_keyword, quote=True)}' placeholder='如当前来源不需要可留空' />
+          <input class='form-control' name='search_keyword' value='{escape(search_keyword, quote=True)}' placeholder='如当前来源不需要可留空' />
         </label>
         <label class='field'>
           <span class='label'>来源分组</span>
-          <select name='source_group'>
+          <select class='form-control' name='source_group'>
             <option value='domestic'{" selected" if group_value == "domestic" else ""}>国内</option>
             <option value='overseas'{" selected" if group_value == "overseas" else ""}>国外</option>
           </select>
+          <span class='field-help'>国内用于“立即采集国内”，国外用于“立即采集国外”。</span>
         </label>
         <label class='field'>
           <span class='label'>调度分组</span>
-          <input name='schedule_group' value='{escape(schedule_group_value, quote=True)}' placeholder='如 morning / evening；留空则不参与定时任务' />
+          <input class='form-control' name='schedule_group' value='{escape(schedule_group_value, quote=True)}' placeholder='如 morning / evening；留空则不参与定时任务' />
         </label>
         <label class='field'>
           <span class='label'>最大条数</span>
-          <input name='max_items' value='{escape(str(source.max_items), quote=True)}' />
+          <input class='form-control' name='max_items' value='{escape(str(source.max_items), quote=True)}' />
         </label>
       </div>
-      <label class='checkbox-row'>
+      <label class='checkbox-row source-config-full'>
         <input type='checkbox' name='enabled' value='true' {checked} />
         <span>启用该采集源</span>
       </label>
-      <p class='helper-note'>当前站点：{escape(str(getattr(source, "site_name", "") or "未命名站点"))}；当前抓取方式：{escape(str(getattr(source, "fetch_mode", "") or "未设置"))}。这个页面只开放常用字段编辑，不修改高级抓取配置。</p>
-      <div class='page-actions'>{_button_submit('保存采集源', 'button-primary')}{_button_link('返回采集源列表', '/sources')}</div>
+      <p class='helper-note source-config-full'>当前站点：{escape(str(getattr(source, "site_name", "") or "未命名站点"))}；当前抓取方式：{escape(str(getattr(source, "fetch_mode", "") or "未设置"))}。这个页面只开放常用字段编辑，不修改高级抓取配置。</p>
+      <div class='page-actions source-config-full source-actions-row'>{_button_submit('保存采集源', 'button-primary')}{_button_link('返回采集源列表', '/sources')}</div>
     </form>
     """
     content = (
@@ -386,7 +387,7 @@ def _render_source_edit_page(source, *, error: str | None = None) -> str:
             subtitle='修改常用字段后保存，系统会回到采集源列表页。',
             actions=_button_link('返回采集源列表', '/sources'),
         )
-        + render_panel(BASE_CONFIG_TITLE, form, extra_class='form-panel')
+        + render_panel(BASE_CONFIG_TITLE, form, extra_class='form-panel', actions="<span class='panel-header-note'>当前支持平台：Bilibili / X / YouTube</span>")
     )
     return render_page(title='编辑采集源', content=content, body_class='theme-dark')
 
@@ -400,7 +401,7 @@ def _get_source_or_404(session: Session, source_id: str):
 
 def _render_schedule_group_run_actions(schedule_groups: list[str]) -> str:
     if not schedule_groups:
-        return "<div class='helper-note'>按调度分组运行：当前还没有可用调度分组。</div>"
+        return ""
     forms = [
         (
             f"<form class='inline-form' method='post' action='/jobs/run/schedule-group/{escape(group, quote=True)}'>"
@@ -415,10 +416,10 @@ def _render_schedule_group_run_actions(schedule_groups: list[str]) -> str:
 def _render_featured_latest_job(service: JobService, recent_jobs) -> str:
     if not recent_jobs:
         return f"""
-        <section class='featured-latest-job'>
+        <section class='featured-latest-job featured-latest-job-compact dashboard-featured-card'>
           <div class='featured-kicker'>{RECENT_RESULT_TITLE}</div>
-          <h2 class='featured-title'>\u6682\u65e0\u6700\u8fd1\u4efb\u52a1</h2>
-          <p class='featured-summary'>\u8fd8\u6ca1\u6709\u53ef\u5c55\u793a\u7684\u91c7\u96c6\u7ed3\u679c\uff0c\u53ef\u4ee5\u7acb\u5373\u89e6\u53d1\u4e00\u6b21\u91c7\u96c6\uff0c\u8ba9\u9996\u9875\u53d8\u6210\u4eca\u65e5\u60c5\u62a5\u53f0\u3002</p>
+          <h2 class='featured-title'>暂无最近任务</h2>
+          <p class='featured-summary'>先触发一次采集，首页就会展示本轮结果。</p>
           <div class='hero-actions'>
             <form class='inline-form' method='post' action='/jobs/run/domestic'>
               {_button_submit('立即采集国内')}
@@ -437,22 +438,23 @@ def _render_featured_latest_job(service: JobService, recent_jobs) -> str:
         if report_id is not None
         else f"<div class='helper-note'>{REPORT_PENDING_HINT}</div>"
     )
+    collection_time = _format_job_collection_time(latest_job)
     return f"""
-    <section class='featured-latest-job'>
+    <section class='featured-latest-job featured-latest-job-compact dashboard-featured-card'>
       <div class='featured-kicker'>{RECENT_RESULT_TITLE}</div>
       <div class='featured-header'>
         <div>
           <div class='kicker'>{LATEST_TASK_ID_LABEL}</div>
-          <h2 class='featured-title'>{escape(str(latest_job.id))}</h2>
+          <h2 class='featured-title'>任务 {escape(str(latest_job.id))}</h2>
+          <div class='resource-meta'>采集时间：{escape(collection_time)}</div>
         </div>
         {render_badge(latest_job.status, _job_status_tone(latest_job.status))}
       </div>
-      <p class='featured-summary'>\u9996\u9875\u5148\u770b\u8fd9\u4e00\u8f6e\u91c7\u96c6\u7684\u6700\u7ec8\u7ed3\u679c\uff0c\u5982\u679c\u9700\u8981\u8ffd\u8e2a\u66f4\u7ec6\u65e5\u5fd7\uff0c\u53ef\u76f4\u63a5\u6253\u5f00\u4efb\u52a1\u8be6\u60c5\u6216\u62a5\u544a\u3002</p>
-      <div class='featured-metrics'>
-        <div class='featured-metric'><span class='kicker'>\u603b\u6765\u6e90</span><strong>{latest_job.total_sources}</strong></div>
-        <div class='featured-metric'><span class='kicker'>\u6210\u529f</span><strong>{latest_job.success_sources}</strong></div>
-        <div class='featured-metric'><span class='kicker'>\u5931\u8d25</span><strong>{latest_job.failed_sources}</strong></div>
-        <div class='featured-metric'><span class='kicker'>\u5df2\u5b8c\u6210</span><strong>{latest_job.completed_sources}</strong></div>
+      <div class='featured-inline-metrics'>
+        <span>总来源 <strong>{latest_job.total_sources}</strong></span>
+        <span>成功 <strong>{latest_job.success_sources}</strong></span>
+        <span>失败 <strong>{latest_job.failed_sources}</strong></span>
+        <span>已完成 <strong>{latest_job.completed_sources}</strong></span>
       </div>
       <div class='hero-actions'>
         {_button_link(VIEW_JOB_DETAIL_LABEL, f"/jobs/{latest_job.id}", "button-primary")}
@@ -488,6 +490,28 @@ def _render_system_status_card(request: Request) -> str:
     )
 
 
+def _render_dashboard_status_bar(request: Request, *, source_count: int, latest_status: str, schedule_groups: list[str]) -> str:
+    try:
+        from app.api import routes_system as _rs
+
+        scheduler = _rs._scheduler_state(request)
+        scheduler_status = "运行中" if scheduler.get("alive") else ("已启用" if scheduler.get("enabled") else "未启用")
+    except Exception:
+        scheduler_status = "未知"
+
+    latest_job_status = "暂无任务" if latest_status == "idle" else latest_status
+    schedule_meta = "已配置调度分组" if schedule_groups else "当前还没有调度分组"
+
+    return (
+        "<section class='dashboard-status-bar'>"
+        f"{render_stat_card(ACTIVE_SOURCES_LABEL, str(source_count), '当前启用与停用来源总数')}"
+        f"{render_stat_card('最近任务', latest_job_status, LATEST_JOB_META)}"
+        f"{render_stat_card(SCHEDULER_STATUS_LABEL, scheduler_status, schedule_meta)}"
+        f"{render_stat_card(REPORT_ENTRY_LABEL, REPORT_ENTRY_VALUE, REPORT_ENTRY_META)}"
+        "</section>"
+    )
+
+
 @router.get("/", response_class=HTMLResponse)
 def index_page(request: Request, session: Session = Depends(get_db_session)) -> str:
     service = JobService(session)
@@ -508,54 +532,65 @@ def index_page(request: Request, session: Session = Depends(get_db_session)) -> 
         run_group_feedback = "<p class='helper-note'>国外分组没有可采集来源。</p>"
     elif run_schedule_group_empty:
         run_group_feedback = f"<p class='helper-note'>调度分组 {escape(run_schedule_group_empty)} 没有可采集来源。</p>"
+    schedule_group_actions = _render_schedule_group_run_actions(schedule_groups)
+    schedule_group_hint = (
+        "<div class='helper-note dashboard-empty-schedule-hint'>按调度分组运行：当前还没有可用调度分组。</div>"
+        if not schedule_groups
+        else ""
+    )
 
     hero = f"""
-    <section class='page-hero dashboard-hero result-hero'>
+    <section class='page-hero dashboard-hero dashboard-hero-compact result-hero'>
       <div class='hero-grid hero-grid-featured'>
-        {_render_featured_latest_job(service, recent_jobs)}
-        <div class='hero-side-stack'>
+        <div class='hero-side-stack dashboard-hero-copy'>
           <div>
             <div class='eyebrow'>Signal Center</div>
             <h1 class='page-title'>{DASHBOARD_TITLE}</h1>
-            <p class='page-subtitle'>\u628a\u6700\u65b0\u4e00\u8f6e\u91c7\u96c6\u7684\u7ed3\u679c\u653e\u5728\u9996\u5c4f\u4e2d\u5fc3\uff0c\u8ba9\u5de5\u4f5c\u53f0\u5148\u56de\u7b54"\u521a\u521a\u6293\u5230\u4e86\u4ec0\u4e48"\u3002</p>
+            <p class='page-subtitle'>首页只保留最关键的运行状态、最近任务结果和常用入口。</p>
+            <div class='dashboard-summary-line'>
+              <span>国内 {domestic_count}</span>
+              <span>国外 {overseas_count}</span>
+              <span>未分组 {ungrouped_count}</span>
+            </div>
             {run_group_feedback}
           </div>
-          <div class='stats-grid compact-stats-grid'>
-            {render_stat_card(ACTIVE_SOURCES_LABEL, str(source_count), ACTIVE_SOURCES_META)}
-            {render_stat_card('国内来源', str(domestic_count), '将纳入“立即采集国内”按钮')}
-            {render_stat_card('国外来源', str(overseas_count), '将纳入“立即采集国外”按钮')}
-            {render_stat_card('未分组来源', str(ungrouped_count), '不会被国内/国外按钮带上')}
-          </div>
-          <div class='hero-actions'>
+          <div class='hero-actions dashboard-primary-actions'>
             <form class='inline-form' method='post' action='/jobs/run/domestic'>
               {_button_submit('立即采集国内')}
             </form>
             <form class='inline-form' method='post' action='/jobs/run/overseas'>
               {_button_submit('立即采集国外')}
             </form>
-            {_render_schedule_group_run_actions(schedule_groups)}
+            {schedule_group_actions}
+          </div>
+          {schedule_group_hint}
+          <div class='hero-actions dashboard-secondary-actions'>
             {_button_link(SOURCES_TITLE, '/sources')}
             {_button_link(REPORTS_TITLE, '/reports')}
           </div>
         </div>
+        {_render_featured_latest_job(service, recent_jobs)}
       </div>
     </section>
     """
 
     quick_actions_html = (
-        "<div id='quick-actions' class='quick-link-list'>"
-        "<a class='mini-card' href='/sources'><h3>\u91c7\u96c6\u6e90\u7ba1\u7406</h3><div class='resource-meta'>\u67e5\u770b\u6765\u6e90\u914d\u7f6e\u3001\u542f\u7528\u72b6\u6001\u4e0e\u5165\u53e3 URL\u3002</div></a>"
-        "<a class='mini-card' href='/reports'><h3>\u5386\u53f2\u62a5\u544a</h3><div class='resource-meta'>\u4e0b\u8f7d\u6700\u8fd1\u751f\u6210\u7684\u70ed\u70b9\u62a5\u544a\u3002</div></a>"
-        "<a class='mini-card' href='/weekly'><h3>\u6700\u8fd1\u4e00\u5468\u70ed\u70b9</h3><div class='resource-meta'>\u7528\u56fa\u5b9a\u8868\u683c\u9875\u67e5\u770b\u6700\u8fd1 7 \u5929\u7684\u91c7\u96c6\u7ed3\u679c\u3002</div></a>"
-        "<a class='mini-card' href='/scheduler'><h3>\u5b9a\u65f6\u8c03\u5ea6</h3><div class='resource-meta'>\u8bbe\u7f6e\u6bcf\u65e5\u81ea\u52a8\u8fd0\u884c\u65f6\u95f4\u3002</div></a>"
-        "<a class='mini-card' href='/scheduler'><h3>\u6309\u8c03\u5ea6\u5206\u7ec4\u8fd0\u884c</h3><div class='resource-meta'>\u7ba1\u7406\u5206\u7ec4\u5e76\u6309\u65f6\u95f4\u70b9\u8fd0\u884c\u5bf9\u5e94\u6765\u6e90\u3002</div></a>"
+        "<div id='quick-actions' class='quick-link-list compact-quick-links'>"
+        "<a class='mini-card' href='/sources'><h3>\u91c7\u96c6\u6e90</h3><div class='resource-meta'>\u67e5\u770b\u6216\u8c03\u6574\u6765\u6e90\u914d\u7f6e\u3002</div></a>"
+        "<a class='mini-card' href='/reports'><h3>\u62a5\u544a</h3><div class='resource-meta'>\u6253\u5f00\u6700\u65b0\u5bfc\u51fa\u7ed3\u679c\u3002</div></a>"
+        "<a class='mini-card' href='/weekly'><h3>\u8fd1 7 \u5929\u70ed\u70b9</h3><div class='resource-meta'>\u67e5\u770b\u6700\u8fd1\u4e00\u5468\u7684\u6c47\u603b\u3002</div></a>"
+        "<a class='mini-card' href='/scheduler'><h3>\u8c03\u5ea6</h3><div class='resource-meta'>\u7ba1\u7406\u65f6\u95f4\u70b9\u548c\u5206\u7ec4\u8fd0\u884c\u3002</div></a>"
         "</div>"
     )
-    content = hero + f"""
-    <section class='content-grid'>
-      {render_panel(SYSTEM_STATUS_TITLE, _render_system_status_card(request), extra_class='system-status-panel')}
-      {render_panel(RECENT_JOBS_TITLE, _render_recent_jobs(recent_jobs), extra_class='recent-jobs-panel')}
-      {render_panel(QUICK_ACTIONS_TITLE, quick_actions_html, extra_class='quick-actions-panel')}
+    content = _render_dashboard_status_bar(
+        request,
+        source_count=source_count,
+        latest_status=latest_status,
+        schedule_groups=schedule_groups,
+    ) + hero + f"""
+    <section class='content-grid dashboard-main-grid'>
+      {render_panel(RECENT_JOBS_TITLE, _render_recent_jobs(recent_jobs), extra_class='recent-jobs-panel dashboard-primary-panel')}
+      {render_panel(QUICK_ACTIONS_TITLE, quick_actions_html, extra_class='quick-actions-panel dashboard-secondary-panel')}
     </section>
     """
     return render_page(title=APP_TITLE, content=content, body_class='theme-dark', page_class='dashboard-page')
@@ -883,34 +918,55 @@ def sources_page(request: Request, session: Session = Depends(get_db_session)) -
 @router.get('/sources/new', response_class=HTMLResponse)
 def new_source_page() -> str:
     form = f"""
-    <form method='post' action='/api/sources/form'>
-      <div class='field-grid'>
-        <label class='field'>
-          <span class='label'>\u5165\u53e3 URL</span>
-          <input name='entry_url' placeholder='https://www.youtube.com/@ElectronicArts ? https://space.bilibili.com/20411266' />
-        </label>
-        <label class='field'>
-          <span class='label'>\u5173\u952e\u8bcd</span>
-          <input name='search_keyword' placeholder='\u4f8b\u5982\uff1a\u6e38\u620f' />
-        </label>
-        <label class='field'>
-          <span class='label'>\u6765\u6e90\u5206\u7ec4</span>
-          <select name='source_group'>
-            <option value='domestic'>国内</option>
-            <option value='overseas'>国外</option>
-          </select>
-        </label>
-        <label class='field'>
-          <span class='label'>调度分组</span>
-          <input name='schedule_group' placeholder='例如：morning；留空则不参与定时任务' />
-        </label>
-        <label class='field'>
-          <span class='label'>\u6700\u5927\u6761\u6570</span>
-          <input name='max_items' value='30' />
-        </label>
-      </div>
-      <p class='helper-note'>只需要填写 URL、分组、关键词和条数，系统会自动推断最合适的采集策略。</p>
-      <div class='page-actions'>{_button_submit(SAVE_SOURCE_LABEL)}</div>
+    <form method='post' action='/api/sources/form' class='source-wizard'>
+      <section class='source-step-panel'>
+        <div class='source-step-head'>
+          <span class='source-step-index'>第 1 步</span>
+          <div>
+            <h3 class='source-step-title'>确定来源入口</h3>
+            <p class='source-step-desc'>先填写入口地址和可选关键词，系统会自动推断合适的平台与采集策略。</p>
+          </div>
+        </div>
+        <div class='field-grid source-config-grid'>
+          <label class='field source-field-full'>
+            <span class='label'>\u5165\u53e3 URL</span>
+            <input class='form-control' name='entry_url' placeholder='https://www.youtube.com/@ElectronicArts ? https://space.bilibili.com/20411266' />
+          </label>
+          <label class='field'>
+            <span class='label'>\u5173\u952e\u8bcd</span>
+            <input class='form-control' name='search_keyword' placeholder='\u4f8b\u5982\uff1a\u6e38\u620f' />
+          </label>
+        </div>
+      </section>
+      <section class='source-step-panel'>
+        <div class='source-step-head'>
+          <span class='source-step-index'>第 2 步</span>
+          <div>
+            <h3 class='source-step-title'>配置采集范围</h3>
+            <p class='source-step-desc'>设置来源分组、调度分组和最大抓取条数，方便后续按地区或时段运行。</p>
+          </div>
+        </div>
+        <div class='field-grid source-config-grid'>
+          <label class='field'>
+            <span class='label'>\u6765\u6e90\u5206\u7ec4</span>
+            <select class='form-control' name='source_group'>
+              <option value='domestic' selected>国内</option>
+              <option value='overseas'>国外</option>
+            </select>
+            <span class='field-help'>国内用于“立即采集国内”，国外用于“立即采集国外”。</span>
+          </label>
+          <label class='field'>
+            <span class='label'>调度分组</span>
+            <input class='form-control' name='schedule_group' placeholder='例如：morning；留空则不参与定时任务' />
+          </label>
+          <label class='field'>
+            <span class='label'>\u6700\u5927\u6761\u6570</span>
+            <input class='form-control' name='max_items' value='30' />
+          </label>
+        </div>
+      </section>
+      <p class='helper-note source-config-full'>只需要填写 URL、分组、关键词和条数，系统会自动推断最合适的采集策略。</p>
+      <div class='page-actions source-config-full source-actions-row'>{_button_submit(SAVE_SOURCE_LABEL)}</div>
     </form>
     """
     content = (
@@ -920,7 +976,7 @@ def new_source_page() -> str:
             subtitle='\u7528\u7b80\u5316\u8868\u5355\u5feb\u901f\u5f55\u5165\u4e00\u4e2a\u65b0\u7684\u70ed\u70b9\u5165\u53e3\uff0c\u9002\u5408\u8fd0\u8425\u540c\u5b66\u65e5\u5e38\u7ef4\u62a4\u3002',
             actions=_button_link('\u8fd4\u56de\u6765\u6e90\u5217\u8868', '/sources'),
         )
-        + render_panel(BASE_CONFIG_TITLE, form, extra_class='form-panel')
+        + render_panel(BASE_CONFIG_TITLE, form, extra_class='form-panel', actions="<span class='panel-header-note'>当前支持平台：Bilibili / X / YouTube</span>")
     )
     return render_page(title=NEW_SOURCE_TITLE, content=content, body_class='theme-dark')
 
@@ -1211,10 +1267,3 @@ async def save_config_center(request: Request) -> Response:
         content=_render_config_center_page(saved_keys=saved_keys),
         status_code=200,
     )
-
-
-
-
-
-
-

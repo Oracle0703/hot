@@ -88,6 +88,7 @@ def test_bilibili_profile_strategy_enriches_items_with_bilibili_stats() -> None:
 
 
 def test_bilibili_profile_strategy_retries_once_when_redirect_or_risk_control_is_retryable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """TC-STRAT-202"""
     monkeypatch.delenv('BILIBILI_RETRY_DELAY_SECONDS', raising=False)
 
     class _RetryableRunner:
@@ -215,6 +216,7 @@ def test_extract_bilibili_profile_video_items_ignores_member_upload_frame_links(
 
 
 def test_extract_items_from_api_payload_reads_arc_list() -> None:
+    """TC-STRAT-203"""
     payload = {
         "code": 0,
         "data": {
@@ -350,6 +352,7 @@ def test_bilibili_profile_runner_adds_parsed_cookie_to_context(monkeypatch: pyte
 
 
 def test_bilibili_profile_runner_raises_when_page_requires_login(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    """TC-STRAT-201"""
     runner = _PlaywrightBilibiliProfileRunner()
     monkeypatch.setenv('BILIBILI_COOKIE', 'SESSDATA=test-sess; bili_jct=test-jct; DedeUserID=123')
 

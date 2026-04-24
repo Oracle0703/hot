@@ -487,4 +487,45 @@ def test_runner_logs_warning_when_dingtalk_notification_is_skipped_for_no_new_it
         )
 
 
+def test_runner_uses_report_root_captured_at_construction(tmp_path, monkeypatch) -> None:
+    session_factory = setup_database(tmp_path, "runner-report-root-freeze.db")
+    original_reports_root = tmp_path / "reports"
+    with session_factory() as session:
+        session.add(
+            Source(
+                name="NGA",
+                site_name="NGA",
+                entry_url="https://example.com",
+                fetch_mode="http",
+                parser_type="generic_css",
+                max_items=30,
+                enabled=True,
+            )
+        )
+        session.commit()
+        JobService(session).create_manual_job()
+
+    runner = JobRunner(
+        session_factory=session_factory,
+        source_executor=lambda source: {
+            "item_count": 1,
+            "items": [
+                {
+                    "title": "固定报告目录",
+                    "url": "https://example.com/post-1",
+                    "published_at": "2026-03-24 08:00",
+                }
+            ],
+        },
+        notification_scheduler=lambda task: task(),
+    )
+
+    monkeypatch.setenv("REPORTS_ROOT", str(tmp_path / "changed-reports"))
+
+    runner.run_once()
+
+    assert (original_reports_root / "global" / "hot-report.md").exists()
+    assert not (tmp_path / "changed-reports" / "global" / "hot-report.md").exists()
+
+
 

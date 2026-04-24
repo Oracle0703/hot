@@ -3,6 +3,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from uuid import UUID
 
+from sqlalchemy import func, select
+
 from app.api.routes_sources import SessionFactoryHolder
 from app.models.item import CollectedItem
 from app.models.source import Source
@@ -140,6 +142,53 @@ def test_reports_page_shows_single_global_report_after_two_runs(tmp_path, monkey
     assert "全局热点总报告" in reports_page.text
     assert "body class='app-shell theme-dark'" in reports_page.text
     assert reports_page.text.count(f"href='/reports/{first_report_id}'") == 1
+
+
+def test_reports_page_can_clear_collected_items_for_crawl_testing(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("REPORTS_ROOT", str(tmp_path / "reports"))
+    html_path = Path(tmp_path) / "topics.html"
+    html_path.write_text(HTML_SOURCE, encoding="utf-8")
+    client = create_test_client(make_sqlite_url(tmp_path, "reports-clear-items.db"))
+    client.post(
+        "/api/sources",
+        json={
+            "name": "本地 HTML",
+            "site_name": "Local",
+            "entry_url": html_path.resolve().as_uri(),
+            "fetch_mode": "http",
+            "parser_type": "generic_css",
+            "list_selector": ".topic",
+            "title_selector": ".topic-link",
+            "link_selector": ".topic-link",
+            "meta_selector": ".topic-time",
+            "include_keywords": ["新游"],
+            "exclude_keywords": [],
+            "max_items": 10,
+            "enabled": True,
+        },
+    )
+    _, report_id = _run_job_and_wait_for_report(client)
+
+    reports_page = client.get("/reports")
+
+    assert reports_page.status_code == 200
+    assert "清空已采集内容" in reports_page.text
+    assert "action='/reports/clear-items'" in reports_page.text
+
+    response = client.post("/reports/clear-items", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/reports?cleared=1&cleared_count=1"
+
+    cleared_page = client.get(response.headers["location"])
+    assert cleared_page.status_code == 200
+    assert "已清空 1 条已采集内容" in cleared_page.text
+    assert f"/reports/{report_id}" in cleared_page.text
+
+    with SessionFactoryHolder.factory() as session:
+        item_count = session.scalar(select(func.count()).select_from(CollectedItem))
+
+    assert item_count == 0
 
 
 def test_weekly_page_lists_recent_week_items_in_requested_columns(tmp_path, monkeypatch) -> None:

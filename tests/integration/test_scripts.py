@@ -195,6 +195,64 @@ def test_build_offline_release_script_prefers_tar_archive() -> None:
     assert "Compress-Archive" not in result.stdout
 
 
+def test_build_offline_release_generates_sha256_file(tmp_path) -> None:
+    """TC-SEC-201"""
+    dist_root = ROOT / "tmp_test_build_offline_dist" / "HotCollectorLauncher"
+    release_root = ROOT / "tmp_test_build_offline_release" / "HotCollector-Offline-Test"
+    playwright_root = ROOT / "tmp_test_build_offline_playwright"
+    vc_redist = ROOT / "tmp_test_build_offline_vcredist.exe"
+    zip_path = Path(str(release_root) + ".zip")
+    sha_path = Path(str(zip_path) + ".sha256")
+    try:
+        for path in (dist_root.parent, release_root.parent, playwright_root):
+            if path.exists():
+                subprocess.run(["powershell", "-Command", f"Remove-Item -Recurse -Force '{path}'"], check=False)
+        for path in (vc_redist, zip_path, sha_path):
+            if path.exists():
+                subprocess.run(["powershell", "-Command", f"Remove-Item -Force '{path}'"], check=False)
+
+        dist_root.mkdir(parents=True, exist_ok=True)
+        playwright_root.mkdir(parents=True, exist_ok=True)
+        (dist_root / "HotCollectorLauncher.exe").write_text("stub", encoding="utf-8")
+        (playwright_root / "browser.txt").write_text("stub", encoding="utf-8")
+        vc_redist.write_text("stub", encoding="utf-8")
+
+        result = run_ps1(
+            BUILD_OFFLINE,
+            "-SkipBuild",
+            "-ReleaseRoot",
+            str(release_root.relative_to(ROOT)),
+            "-DistRoot",
+            str(dist_root.relative_to(ROOT)),
+            "-PlaywrightBrowsersPath",
+            str(playwright_root),
+            "-VcRedistPath",
+            str(vc_redist),
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert zip_path.exists()
+        assert sha_path.exists()
+        sha_line = sha_path.read_text(encoding="ascii").strip()
+        file_hash = subprocess.run(
+            ["powershell", "-Command", f"(Get-FileHash -Algorithm SHA256 '{zip_path}').Hash.ToLower()"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert file_hash.returncode == 0, file_hash.stderr
+        expected = f"{file_hash.stdout.strip()}  {zip_path.name}"
+        assert sha_line == expected
+    finally:
+        for path in (dist_root.parent, release_root.parent, playwright_root):
+            if path.exists():
+                subprocess.run(["powershell", "-Command", f"Remove-Item -Recurse -Force '{path}'"], check=False)
+        for path in (vc_redist, zip_path, sha_path):
+            if path.exists():
+                subprocess.run(["powershell", "-Command", f"Remove-Item -Force '{path}'"], check=False)
+
+
 def test_launcher_dry_run_prints_local_runtime_summary(tmp_path) -> None:
     result = subprocess.run(
         [
@@ -234,5 +292,3 @@ def test_build_spec_collects_playwright_package_data() -> None:
 
     assert 'collect_submodules("playwright")' in spec_text
     assert 'collect_data_files("playwright")' in spec_text
-
-
