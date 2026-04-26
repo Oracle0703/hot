@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from app.services.failure_classifier import FailureCode
 from app.services.retry_policy import RetryPolicy, DEFAULT_RETRY_ON
 from app.services.strategies.registry import ReasonCode, StrategyError
 
@@ -80,3 +81,9 @@ def test_backoff_is_exponential() -> None:
     with pytest.raises(StrategyError):
         policy.run(work, sleep=lambda s: waits.append(s))
     assert waits == [1.0, 2.0]
+
+
+def test_auth_error_is_not_retried() -> None:
+    policy = RetryPolicy(max_attempts=3, retry_on=(FailureCode.NETWORK, FailureCode.TIMEOUT))
+
+    assert policy.should_retry(FailureCode.AUTH_EXPIRED, 1) is False

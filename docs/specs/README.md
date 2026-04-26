@@ -21,6 +21,7 @@
 | 80   | [80-testing.md](80-testing.md)                                   | 测试分层、命名规范、夹具          |
 | 90   | [90-release-and-upgrade.md](90-release-and-upgrade.md)           | 发布、升级、SHA256 完整性         |
 | --   | [api-reference.md](api-reference.md)                             | 业务语境的 API 说明               |
+| --   | [desktop-manifest.schema.json](desktop-manifest.schema.json)     | 桌面壳 manifest 的 JSON Schema    |
 
 ## 文档约定
 

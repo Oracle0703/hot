@@ -48,6 +48,30 @@
 | `dingtalk.last_status`   | 最近一次发送结果                                      |
 | `issues[]`               | `{ "code": "...", "message": "...", "severity": "warn | error" }` |
 
+### `GET /system/desktop-manifest`
+
+为后续桌面壳或本地启动器提供稳定入口清单，避免在客户端硬编码导航路径。
+对应的 JSON Schema 文件已提交到 `docs/specs/desktop-manifest.schema.json`，可直接用于桌面壳侧离线校验或生成类型。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `kind` | string | 固定为 `desktop-shell-manifest` |
+| `entry_route` | string | Web 主入口 |
+| `info_route` | string | 系统信息接口 |
+| `health_route` | string | 扩展健康检查接口 |
+| `docs_route` | string | FastAPI 文档入口 |
+| `navigation[]` | array | 推荐导航项，包含 `id` / `label` / `href` |
+| `service.entry_url` | string | 当前实例的绝对首页 URL |
+| `service.desktop_manifest_url` | string | 当前 manifest 的绝对 URL |
+| `service.health_url` | string | 当前实例健康检查绝对 URL |
+| `service.docs_url` | string | 当前实例 API 文档绝对 URL |
+| `runtime.runtime_root` | string | 当前运行根目录 |
+| `runtime.reports_root` | string | 报告目录 |
+| `runtime.pid_file` | string | 启动器 PID 文件位置 |
+| `control.launch` | object | 本地启动入口，包含 `launcher_path`、`source_entry_path`、`release_bat_path`、`preferred_path`、`launch_mode`、`preferred_args`、`default_args` |
+| `control.probe` | object | 本地状态探测入口，包含 `script_path`、`release_bat_path`、`preferred_path`、`launch_mode`、`preferred_args`、`default_args` |
+| `control.stop` | object | 本地停止入口，包含 `script_path`、`release_bat_path`、`preferred_path`、`launch_mode`、`preferred_args`、`default_args` |
+
 ### `POST /system/jobs/cancel-running`
 
 | 入参    | 类型         | 说明                                    |

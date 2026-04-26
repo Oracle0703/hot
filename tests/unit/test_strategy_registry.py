@@ -66,6 +66,12 @@ def test_strategy_error_carries_reason_code() -> None:
     assert bad.reason_code == ReasonCode.UNKNOWN
 
 
+def test_strategy_error_accepts_extended_reason_codes() -> None:
+    err = StrategyError(ReasonCode.AUTH_EXPIRED, "expired")
+
+    assert err.reason_code == ReasonCode.AUTH_EXPIRED
+
+
 def test_cancel_event_interrupts_fetch() -> None:
     """TC-STRAT-006"""
     cancel = threading.Event()

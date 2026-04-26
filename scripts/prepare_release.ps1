@@ -20,6 +20,7 @@ $ReadmeSource = Join-Path $ProjectRoot 'README-运营版.txt'
 $LauncherExe = Join-Path $ReleaseDir 'HotCollectorLauncher.exe'
 $StartBat = Join-Path $ReleaseDir '启动系统.bat'
 $StopBat = Join-Path $ReleaseDir '停止系统.bat'
+$StatusBat = Join-Path $ReleaseDir '查看状态.bat'
 $InstallBat = Join-Path $ReleaseDir '安装依赖.bat'
 $AppEnvFile = Join-Path $DataDir 'app.env'
 
@@ -74,6 +75,7 @@ $stopContent = @'
 @echo off
 powershell -ExecutionPolicy Bypass -Command "$pidFile = Join-Path '%~dp0data' 'launcher.pid'; if (Test-Path $pidFile) { $targetPid = Get-Content $pidFile | Select-Object -First 1; if ($targetPid) { Stop-Process -Id $targetPid -Force -ErrorAction SilentlyContinue }; Remove-Item -Path $pidFile -Force -ErrorAction SilentlyContinue }"
 '@
+$statusContent = "@echo off`r`ncd /d %~dp0`r`nHotCollectorLauncher.exe --probe --print-json %*`r`n"
 $installContent = @"
 @echo off
 cd /d %~dp0
@@ -107,10 +109,12 @@ BILIBILI_COOKIE=
 
 Invoke-Message "写入启动脚本: $StartBat"
 Invoke-Message "写入停止脚本: $StopBat"
+Invoke-Message "写入状态脚本: $StatusBat"
 Invoke-Message "写入依赖安装脚本: $InstallBat"
 Invoke-Message "写入默认配置: $AppEnvFile"
 New-FileContent -Path $StartBat -Content $startContent
 New-FileContent -Path $StopBat -Content $stopContent
+New-FileContent -Path $StatusBat -Content $statusContent
 New-FileContent -Path $InstallBat -Content $installContent
 New-FileContent -Path $AppEnvFile -Content $appEnvContent
 

@@ -7,9 +7,11 @@ from zipfile import ZipFile
 
 from app.db import create_session_factory, get_engine
 from app.models.base import Base
+from app.models.content_item import ContentItem
 from app.models.item import CollectedItem
 from app.models.job import CollectionJob
 from app.models.job_log import JobLog
+from app.models.raw_item import RawItem
 from app.models.report import Report
 from app.models.source import Source
 from app.services.job_service import JobService
@@ -665,3 +667,37 @@ def test_report_service_downloads_item_images_into_markdown_and_docx(tmp_path, m
 
         with ZipFile(report.docx_path) as archive:
             assert any(name.startswith("word/media/") for name in archive.namelist())
+
+
+def test_report_service_promotes_source_runs_into_content_pipeline(tmp_path) -> None:
+    session_factory = setup_database(tmp_path, "report-service-content-pipeline.db")
+
+    with session_factory() as session:
+        source = create_source(session, "内容来源", "https://example.com/source-content")
+        job = JobService(session).create_manual_job()
+
+        ReportService(session).generate_for_job(
+            job,
+            [
+                {
+                    "source_id": source.id,
+                    "source_name": source.name,
+                    "items": [
+                        {
+                            "title": "统一内容帖子",
+                            "url": "https://example.com/content-post",
+                            "published_at": "2026-03-24 08:00",
+                        }
+                    ],
+                }
+            ],
+        )
+
+        raw_items = list(session.scalars(select(RawItem)).all())
+        content_items = list(session.scalars(select(ContentItem)).all())
+        collected_items = list(session.scalars(select(CollectedItem)).all())
+
+        assert len(raw_items) == 1
+        assert len(content_items) == 1
+        assert len(collected_items) == 1
+        assert content_items[0].canonical_url == "https://example.com/content-post"

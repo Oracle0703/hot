@@ -2,17 +2,26 @@
 
 from datetime import datetime
 from html import escape
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlencode
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from pydantic import ValidationError
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.api.routes_content import query_content_items
+from app.api.routes_deliveries import query_delivery_rows
 from app.api.routes_sources import get_db_session
+from app.api.routes_subscriptions import query_subscriptions
+from app.models.content_item import ContentItem
+from app.models.delivery_record import DeliveryRecord
+from app.models.subscription import Subscription
 from app.schemas.source import SourceUpdate
 from app.services.app_env_service import AppEnvService
 from app.services.bilibili_auth_service import BilibiliBrowserAuthService
+from app.services.content_dispatch_service import ContentDispatchService
 from app.services.job_service import JobService
 from app.services.schedule_plan_service import SchedulePlanService
 from app.services.scheduler_service import SchedulerService
@@ -26,6 +35,9 @@ DASHBOARD_TITLE = "\u70ed\u70b9\u4fe1\u53f7\u603b\u89c8"
 RUN_NOW = "\u7acb\u5373\u91c7\u96c6"
 SOURCES_TITLE = "\u91c7\u96c6\u6e90\u7ba1\u7406"
 REPORTS_TITLE = "\u5386\u53f2\u62a5\u544a"
+CONTENT_CENTER_TITLE = "\u5185\u5bb9\u4e2d\u5fc3"
+SUBSCRIPTIONS_TITLE = "\u8ba2\u9605\u4e2d\u5fc3"
+DELIVERIES_TITLE = "\u6295\u9012\u72b6\u6001"
 SCHEDULER_TITLE = "\u5b9a\u65f6\u8c03\u5ea6"
 NEW_SOURCE_TITLE = "\u65b0\u589e\u91c7\u96c6\u6e90"
 JOB_DETAIL_TITLE = "\u4efb\u52a1\u8be6\u60c5"
@@ -106,6 +118,25 @@ def _button_link(label: str, href: str, variant: str = "button-secondary") -> st
 
 def _button_submit(label: str, variant: str = "button-primary") -> str:
     return f"<button class='{escape(variant)}' type='submit'>{escape(label)}</button>"
+
+
+def _build_deliveries_query_string(
+    *,
+    subscription_code: str = "",
+    status: str = "",
+    channel: str = "",
+    retried_count: int | None = None,
+) -> str:
+    query_params: list[tuple[str, str]] = []
+    if subscription_code:
+        query_params.append(("subscription_code", subscription_code))
+    if status:
+        query_params.append(("status", status))
+    if channel:
+        query_params.append(("channel", channel))
+    if retried_count is not None:
+        query_params.append(("retried_count", str(retried_count)))
+    return f"?{urlencode(query_params)}" if query_params else ""
 
 
 def _job_status_tone(status: str) -> str:
@@ -578,6 +609,9 @@ def index_page(request: Request, session: Session = Depends(get_db_session)) -> 
         "<div id='quick-actions' class='quick-link-list compact-quick-links'>"
         "<a class='mini-card' href='/sources'><h3>\u91c7\u96c6\u6e90</h3><div class='resource-meta'>\u67e5\u770b\u6216\u8c03\u6574\u6765\u6e90\u914d\u7f6e\u3002</div></a>"
         "<a class='mini-card' href='/reports'><h3>\u62a5\u544a</h3><div class='resource-meta'>\u6253\u5f00\u6700\u65b0\u5bfc\u51fa\u7ed3\u679c\u3002</div></a>"
+        "<a class='mini-card' href='/content-center'><h3>\u5185\u5bb9\u4e2d\u5fc3</h3><div class='resource-meta'>\u67e5\u770b\u5f52\u4e00\u5316\u540e\u7684\u5185\u5bb9\u8d44\u4ea7\u3002</div></a>"
+        "<a class='mini-card' href='/subscriptions'><h3>\u8ba2\u9605\u4e2d\u5fc3</h3><div class='resource-meta'>\u67e5\u770b\u5df2\u914d\u7f6e\u7684\u5206\u53d1\u89c4\u5219\u3002</div></a>"
+        "<a class='mini-card' href='/deliveries'><h3>\u6295\u9012\u72b6\u6001</h3><div class='resource-meta'>\u67e5\u770b\u81ea\u52a8\u5206\u53d1\u7684\u6295\u9012\u8bb0\u5f55\u3002</div></a>"
         "<a class='mini-card' href='/weekly'><h3>\u8fd1 7 \u5929\u70ed\u70b9</h3><div class='resource-meta'>\u67e5\u770b\u6700\u8fd1\u4e00\u5468\u7684\u6c47\u603b\u3002</div></a>"
         "<a class='mini-card' href='/scheduler'><h3>\u8c03\u5ea6</h3><div class='resource-meta'>\u7ba1\u7406\u65f6\u95f4\u70b9\u548c\u5206\u7ec4\u8fd0\u884c\u3002</div></a>"
         "</div>"
@@ -982,6 +1016,307 @@ def new_source_page() -> str:
         + render_panel(BASE_CONFIG_TITLE, form, extra_class='form-panel', actions="<span class='panel-header-note'>当前支持平台：Bilibili / X / YouTube</span>")
     )
     return render_page(title=NEW_SOURCE_TITLE, content=content, body_class='theme-dark')
+
+
+@router.get('/content-center', response_class=HTMLResponse)
+def content_center_page(
+    title: str | None = None,
+    tag: str | None = None,
+    session: Session = Depends(get_db_session),
+) -> str:
+    items = query_content_items(session, title=title, tag=tag)
+    title_value = escape((title or "").strip(), quote=True)
+    tag_value = escape((tag or "").strip(), quote=True)
+    filter_form = f"""
+    <form method='get' action='/content-center' class='scheduler-form scheduler-settings-panel'>
+      <div class='field-grid source-config-grid'>
+        <label class='field'>
+          <span class='label'>标题关键词</span>
+          <input class='form-control' name='title' value='{title_value}' placeholder='支持模糊匹配，如 校招' />
+        </label>
+        <label class='field'>
+          <span class='label'>标签</span>
+          <input class='form-control' name='tag' value='{tag_value}' placeholder='支持标签筛选，如 HR情报源' />
+        </label>
+      </div>
+      <div class='page-actions source-actions-row'>{_button_submit('筛选', 'button-primary')}{_button_link('重置', '/content-center')}</div>
+    </form>
+    """
+    if not items:
+        panel_body = (
+            filter_form
+            + "<div class='empty-state'>暂无内容资产，先执行一次采集即可在这里查看归一化结果。</div><div class='helper-note'>API: <code>/api/content</code></div>"
+        )
+    else:
+        rows = "".join(
+            (
+                "<tr>"
+                f"<td>{escape(item.title)}</td>"
+                f"<td>{escape(item.canonical_url or '--')}</td>"
+                f"<td>{escape('、'.join(item.tags or []) or '--')}</td>"
+                "</tr>"
+            )
+            for item in items
+        )
+        panel_body = (
+            filter_form
+            + "<div class='helper-note'>API: <code>/api/content</code></div>"
+            "<div class='data-table-wrapper'>"
+            "<table class='data-table'><thead><tr><th>标题</th><th>链接</th><th>标签</th></tr></thead>"
+            f"<tbody>{rows}</tbody></table></div>"
+        )
+    content = (
+        render_page_header(
+            eyebrow='Content',
+            title=CONTENT_CENTER_TITLE,
+            subtitle='展示归一化、去重后的共享内容对象。',
+            actions=_button_link('返回首页', '/') + _button_link('内容 API', '/api/content'),
+        )
+        + render_panel(CONTENT_CENTER_TITLE, panel_body, extra_class='reports-overview-panel')
+    )
+    return render_page(title=CONTENT_CENTER_TITLE, content=content, body_class='theme-dark')
+
+
+@router.get('/subscriptions', response_class=HTMLResponse)
+def subscriptions_page(
+    code: str | None = None,
+    channel: str | None = None,
+    session: Session = Depends(get_db_session),
+) -> str:
+    items = query_subscriptions(session, code=code, channel=channel)
+    code_value = escape((code or "").strip(), quote=True)
+    channel_value = (channel or "").strip()
+    filter_form = f"""
+    <form method='get' action='/subscriptions' class='scheduler-form scheduler-settings-panel'>
+      <div class='field-grid source-config-grid'>
+        <label class='field'>
+          <span class='label'>订阅编码</span>
+          <input class='form-control' name='code' value='{code_value}' placeholder='支持模糊匹配，如 hr' />
+        </label>
+        <label class='field'>
+          <span class='label'>渠道</span>
+          <select class='form-control' name='channel'>
+            <option value=''{" selected" if not channel_value else ""}>全部</option>
+            <option value='dingtalk'{" selected" if channel_value == "dingtalk" else ""}>dingtalk</option>
+            <option value='email'{" selected" if channel_value == "email" else ""}>email</option>
+          </select>
+        </label>
+      </div>
+      <div class='page-actions source-actions-row'>{_button_submit('筛选', 'button-primary')}{_button_link('重置', '/subscriptions')}</div>
+    </form>
+    """
+    if not items:
+        panel_body = (
+            filter_form
+            + "<div class='empty-state'>暂无订阅规则，可先通过 API 创建一条最小规则。</div><div class='helper-note'>API: <code>/api/subscriptions</code></div>"
+        )
+    else:
+        rows = "".join(
+            (
+                "<tr>"
+                f"<td>{escape(item.code)}</td>"
+                f"<td>{escape(item.channel)}</td>"
+                f"<td>{escape('、'.join(item.business_lines or []) or '--')}</td>"
+                f"<td>{escape('、'.join(item.keywords or []) or '--')}</td>"
+                "</tr>"
+            )
+            for item in items
+        )
+        panel_body = (
+            filter_form
+            + "<div class='helper-note'>API: <code>/api/subscriptions</code></div>"
+            "<div class='data-table-wrapper'>"
+            "<table class='data-table'><thead><tr><th>编码</th><th>渠道</th><th>业务线</th><th>关键词</th></tr></thead>"
+            f"<tbody>{rows}</tbody></table></div>"
+        )
+    content = (
+        render_page_header(
+            eyebrow='Subscriptions',
+            title=SUBSCRIPTIONS_TITLE,
+            subtitle='查看当前内容分发规则与订阅维度。',
+            actions=_button_link('返回首页', '/') + _button_link('订阅 API', '/api/subscriptions'),
+        )
+        + render_panel(SUBSCRIPTIONS_TITLE, panel_body, extra_class='reports-overview-panel')
+    )
+    return render_page(title=SUBSCRIPTIONS_TITLE, content=content, body_class='theme-dark')
+
+
+@router.get('/deliveries', response_class=HTMLResponse)
+def deliveries_page(
+    subscription_code: str | None = None,
+    status: str | None = None,
+    channel: str | None = None,
+    session: Session = Depends(get_db_session),
+) -> str:
+    rows = query_delivery_rows(
+        session,
+        subscription_code=subscription_code,
+        status=status,
+        channel=channel,
+    )
+    subscription_code_value = escape((subscription_code or "").strip(), quote=True)
+    status_value = (status or "").strip()
+    channel_value = (channel or "").strip()
+    filter_form = f"""
+    <form method='get' action='/deliveries' class='scheduler-form scheduler-settings-panel'>
+      <div class='field-grid source-config-grid'>
+        <label class='field'>
+          <span class='label'>订阅编码</span>
+          <input class='form-control' name='subscription_code' value='{subscription_code_value}' placeholder='支持模糊匹配，如 hr' />
+        </label>
+        <label class='field'>
+          <span class='label'>投递状态</span>
+          <select class='form-control' name='status'>
+            <option value=''{" selected" if not status_value else ""}>全部</option>
+            <option value='sent'{" selected" if status_value == "sent" else ""}>sent</option>
+            <option value='failed'{" selected" if status_value == "failed" else ""}>failed</option>
+          </select>
+        </label>
+        <label class='field'>
+          <span class='label'>渠道</span>
+          <select class='form-control' name='channel'>
+            <option value=''{" selected" if not channel_value else ""}>全部</option>
+            <option value='dingtalk'{" selected" if channel_value == "dingtalk" else ""}>dingtalk</option>
+            <option value='email'{" selected" if channel_value == "email" else ""}>email</option>
+          </select>
+        </label>
+      </div>
+      <div class='page-actions source-actions-row'>{_button_submit('筛选', 'button-primary')}{_button_link('重置', '/deliveries')}</div>
+    </form>
+    """
+    if not rows:
+        panel_body = (
+            filter_form
+            + "<div class='empty-state'>暂无投递记录，先完成一次自动订阅分发后再来查看。</div><div class='helper-note'>API: <code>/api/deliveries</code></div>"
+        )
+    else:
+        batch_retry_action = _render_delivery_retry_failed_action(
+            rows,
+            subscription_code=subscription_code_value,
+            status=status_value,
+            channel=channel_value,
+        )
+        table_rows = "".join(
+            (
+                "<tr>"
+                f"<td>{escape(str(subscription_code))}</td>"
+                f"<td>{escape(str(channel))}</td>"
+                f"<td>{escape(str(content_title))}</td>"
+                f"<td>{escape(str(content_url or '--'))}</td>"
+                f"<td>{escape(str(record.status))}</td>"
+                f"<td>{escape(str(record.error_message or '--'))}</td>"
+                f"<td>{_render_delivery_retry_action(record, subscription_code=subscription_code_value, status=status_value, channel=channel_value)}</td>"
+                f"<td>{escape(record.created_at.strftime('%Y-%m-%d %H:%M'))}</td>"
+                "</tr>"
+            )
+            for record, subscription_code, channel, content_title, content_url in rows
+        )
+        panel_body = (
+            filter_form
+            + batch_retry_action
+            + "<div class='helper-note'>API: <code>/api/deliveries</code></div>"
+            "<div class='data-table-wrapper'>"
+            "<table class='data-table'><thead><tr><th>订阅编码</th><th>渠道</th><th>内容标题</th><th>内容链接</th><th>状态</th><th>失败原因</th><th>操作</th><th>投递时间</th></tr></thead>"
+            f"<tbody>{table_rows}</tbody></table></div>"
+        )
+    content = (
+        render_page_header(
+            eyebrow='Deliveries',
+            title=DELIVERIES_TITLE,
+            subtitle='查看自动分发后的投递记录和当前状态。',
+            actions=_button_link('返回首页', '/') + _button_link('投递 API', '/api/deliveries'),
+        )
+        + render_panel(DELIVERIES_TITLE, panel_body, extra_class='reports-overview-panel')
+    )
+    return render_page(title=DELIVERIES_TITLE, content=content, body_class='theme-dark')
+
+
+def _render_delivery_retry_action(record, *, subscription_code: str, status: str, channel: str) -> str:
+    if str(getattr(record, "status", "") or "") != "failed":
+        return "<span class='muted-text'>--</span>"
+    hidden_parts: list[str] = []
+    if subscription_code:
+        hidden_parts.append(f"<input type='hidden' name='subscription_code' value='{subscription_code}' />")
+    if status:
+        hidden_parts.append(f"<input type='hidden' name='status' value='{escape(status, quote=True)}' />")
+    if channel:
+        hidden_parts.append(f"<input type='hidden' name='channel' value='{escape(channel, quote=True)}' />")
+    return (
+        f"<form method='post' action='/deliveries/{escape(str(record.id), quote=True)}/retry' class='inline-form'>"
+        + "".join(hidden_parts)
+        + "<button class='button-secondary' type='submit'>重试</button>"
+        + "</form>"
+    )
+
+
+def _render_delivery_retry_failed_action(rows, *, subscription_code: str, status: str, channel: str) -> str:
+    has_failed_record = any(str(getattr(record, "status", "") or "") == "failed" for record, _, _, _, _ in rows)
+    if not has_failed_record:
+        return ""
+    hidden_parts: list[str] = []
+    if subscription_code:
+        hidden_parts.append(f"<input type='hidden' name='subscription_code' value='{subscription_code}' />")
+    if status:
+        hidden_parts.append(f"<input type='hidden' name='status' value='{escape(status, quote=True)}' />")
+    if channel:
+        hidden_parts.append(f"<input type='hidden' name='channel' value='{escape(channel, quote=True)}' />")
+    return (
+        "<form method='post' action='/deliveries/retry-failed' class='inline-form'>"
+        + "".join(hidden_parts)
+        + "<button class='button-primary' type='submit'>批量重试失败项</button>"
+        + "</form>"
+    )
+
+
+@router.post('/deliveries/{delivery_id}/retry')
+async def retry_delivery_page(delivery_id: str, request: Request, session: Session = Depends(get_db_session)) -> RedirectResponse:
+    form_data = parse_qs((await request.body()).decode('utf-8'))
+    subscription_code = form_data.get('subscription_code', [''])[0].strip()
+    status_value = form_data.get('status', [''])[0].strip()
+    channel = form_data.get('channel', [''])[0].strip()
+
+    try:
+        delivery_uuid = UUID(delivery_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail='delivery record not found') from exc
+
+    record = session.get(DeliveryRecord, delivery_uuid)
+    if record is None:
+        raise HTTPException(status_code=404, detail='delivery record not found')
+    if record.status != 'failed':
+        raise HTTPException(status_code=409, detail='only failed delivery can be retried')
+
+    ContentDispatchService(session).retry_delivery_record(delivery_uuid)
+    query_string = _build_deliveries_query_string(
+        subscription_code=subscription_code,
+        status=status_value,
+        channel=channel,
+    )
+    return RedirectResponse(url=f'/deliveries{query_string}', status_code=303)
+
+
+@router.post('/deliveries/retry-failed')
+async def retry_failed_deliveries_page(request: Request, session: Session = Depends(get_db_session)) -> RedirectResponse:
+    form_data = parse_qs((await request.body()).decode('utf-8'))
+    subscription_code = form_data.get('subscription_code', [''])[0].strip()
+    status_value = form_data.get('status', [''])[0].strip()
+    channel = form_data.get('channel', [''])[0].strip()
+
+    rows = query_delivery_rows(
+        session,
+        subscription_code=subscription_code or None,
+        status='failed',
+        channel=channel or None,
+    )
+    delivery_ids = [record.id for record, _, _, _, _ in rows]
+    retried_count = ContentDispatchService(session).retry_delivery_records(delivery_ids)
+    query_string = _build_deliveries_query_string(
+        subscription_code=subscription_code,
+        status=status_value,
+        channel=channel,
+        retried_count=retried_count,
+    )
+    return RedirectResponse(url=f'/deliveries{query_string}', status_code=303)
 
 
 @router.get('/sources/{source_id}', response_class=HTMLResponse)

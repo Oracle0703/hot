@@ -6,9 +6,13 @@ from uuid import UUID
 from sqlalchemy import select
 
 from app.api.routes_sources import SessionFactoryHolder
+from app.services.dingtalk_webhook_service import DingTalkWebhookService
 from app.runtime_paths import get_runtime_paths
+from app.models.content_item import ContentItem
+from app.models.delivery_record import DeliveryRecord
 from app.models.job import CollectionJob
 from app.models.job_log import JobLog
+from app.models.subscription import Subscription
 from tests.conftest import create_test_client, make_sqlite_url
 
 
@@ -63,6 +67,9 @@ def test_index_page_shows_dashboard_actions(tmp_path) -> None:
     assert "/sources" in response.text
     assert "/reports" in response.text
     assert "/weekly" in response.text
+    assert "/content-center" in response.text
+    assert "/subscriptions" in response.text
+    assert "/deliveries" in response.text
 
 
 def test_post_run_job_redirects_to_job_detail_page(tmp_path) -> None:
@@ -311,6 +318,323 @@ def test_sources_page_lists_sources_and_actions(tmp_path) -> None:
     assert "NGA Hot" in response.text
     assert "编辑" in response.text
     assert "/sources/" in response.text
+
+
+def test_content_center_page_is_accessible(tmp_path) -> None:
+    client = create_test_client(make_sqlite_url(tmp_path, "pages-content-center.db"))
+
+    response = client.get("/content-center")
+
+    assert response.status_code == 200
+    assert "内容中心" in response.text
+    assert "/api/content" in response.text
+
+
+def test_content_center_page_supports_filtering(tmp_path) -> None:
+    client = create_test_client(make_sqlite_url(tmp_path, "pages-content-center-filter.db"))
+
+    with SessionFactoryHolder.factory() as session:
+        session.add_all(
+            [
+                ContentItem(
+                    dedupe_key="page-content-filter-1",
+                    title="校招信息汇总",
+                    canonical_url="https://example.com/page-content-filter-1",
+                    tags=["HR情报源", "校招"],
+                    raw_payload={},
+                ),
+                ContentItem(
+                    dedupe_key="page-content-filter-2",
+                    title="版号情报汇总",
+                    canonical_url="https://example.com/page-content-filter-2",
+                    tags=["市场情报源"],
+                    raw_payload={},
+                ),
+            ]
+        )
+        session.commit()
+
+    response = client.get("/content-center?title=校招&tag=HR情报源")
+
+    assert response.status_code == 200
+    assert "name='title'" in response.text
+    assert "name='tag'" in response.text
+    assert "校招信息汇总" in response.text
+    assert "版号情报汇总" not in response.text
+
+
+def test_subscriptions_page_is_accessible(tmp_path) -> None:
+    client = create_test_client(make_sqlite_url(tmp_path, "pages-subscriptions.db"))
+
+    response = client.get("/subscriptions")
+
+    assert response.status_code == 200
+    assert "订阅中心" in response.text
+    assert "/api/subscriptions" in response.text
+
+
+def test_subscriptions_page_supports_filtering(tmp_path) -> None:
+    client = create_test_client(make_sqlite_url(tmp_path, "pages-subscriptions-filter.db"))
+
+    with SessionFactoryHolder.factory() as session:
+        session.add_all(
+            [
+                Subscription(
+                    code="hr-daily",
+                    channel="dingtalk",
+                    business_lines=["hr"],
+                    keywords=["校招"],
+                ),
+                Subscription(
+                    code="market-daily",
+                    channel="email",
+                    business_lines=["market"],
+                    keywords=["版号"],
+                ),
+            ]
+        )
+        session.commit()
+
+    response = client.get("/subscriptions?code=hr&channel=dingtalk")
+
+    assert response.status_code == 200
+    assert "name='code'" in response.text
+    assert "name='channel'" in response.text
+    assert "hr-daily" in response.text
+    assert "market-daily" not in response.text
+
+
+def test_deliveries_page_is_accessible(tmp_path) -> None:
+    client = create_test_client(make_sqlite_url(tmp_path, "pages-deliveries.db"))
+
+    response = client.get("/deliveries")
+
+    assert response.status_code == 200
+    assert "投递状态" in response.text
+    assert "/api/deliveries" in response.text
+
+
+def test_deliveries_page_supports_filtering(tmp_path) -> None:
+    client = create_test_client(make_sqlite_url(tmp_path, "pages-deliveries-filter.db"))
+
+    with SessionFactoryHolder.factory() as session:
+        target_subscription = Subscription(
+            code="hr-daily",
+            channel="dingtalk",
+            business_lines=["HR情报源"],
+            keywords=["校招"],
+        )
+        other_subscription = Subscription(
+            code="market-daily",
+            channel="email",
+            business_lines=["市场情报源"],
+            keywords=["版号"],
+        )
+        target_content = ContentItem(
+            dedupe_key="page-content-1",
+            title="校招信息汇总",
+            canonical_url="https://example.com/page-content-1",
+            tags=["HR情报源"],
+            raw_payload={},
+        )
+        other_content = ContentItem(
+            dedupe_key="page-content-2",
+            title="版号情报汇总",
+            canonical_url="https://example.com/page-content-2",
+            tags=["市场情报源"],
+            raw_payload={},
+        )
+        session.add_all([target_subscription, other_subscription, target_content, other_content])
+        session.flush()
+        session.add_all(
+            [
+                DeliveryRecord(
+                    subscription_id=target_subscription.id,
+                    content_item_id=target_content.id,
+                    status="sent",
+                ),
+                DeliveryRecord(
+                    subscription_id=other_subscription.id,
+                    content_item_id=other_content.id,
+                    status="failed",
+                ),
+            ]
+        )
+        session.commit()
+
+    response = client.get("/deliveries?subscription_code=hr&status=sent&channel=dingtalk")
+
+    assert response.status_code == 200
+    assert "name='subscription_code'" in response.text
+    assert "name='status'" in response.text
+    assert "name='channel'" in response.text
+    assert "校招信息汇总" in response.text
+    assert "版号情报汇总" not in response.text
+
+
+def test_deliveries_page_shows_error_message_for_failed_records(tmp_path) -> None:
+    client = create_test_client(make_sqlite_url(tmp_path, "pages-deliveries-error-message.db"))
+
+    with SessionFactoryHolder.factory() as session:
+        subscription = Subscription(
+            code="hr-daily",
+            channel="dingtalk",
+            business_lines=["HR情报源"],
+            keywords=["校招"],
+        )
+        content_item = ContentItem(
+            dedupe_key="page-content-error-1",
+            title="校招信息汇总",
+            canonical_url="https://example.com/page-content-error-1",
+            tags=["HR情报源"],
+            raw_payload={},
+        )
+        session.add_all([subscription, content_item])
+        session.flush()
+        session.add(
+            DeliveryRecord(
+                subscription_id=subscription.id,
+                content_item_id=content_item.id,
+                status="failed",
+                error_message="webhook failed",
+            )
+        )
+        session.commit()
+
+    response = client.get("/deliveries?status=failed")
+
+    assert response.status_code == 200
+    assert "失败原因" in response.text
+    assert "webhook failed" in response.text
+
+
+def test_deliveries_page_can_retry_failed_record(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("ENABLE_DINGTALK_NOTIFIER", "true")
+    monkeypatch.setenv("DINGTALK_WEBHOOK", "https://oapi.dingtalk.com/robot/send?access_token=test-token")
+    requests: list[dict[str, object]] = []
+
+    def fake_send(self, webhook: str, payload: dict[str, object], timeout_seconds: float, secret: str | None) -> None:
+        requests.append({"webhook": webhook, "payload": payload, "secret": secret})
+
+    monkeypatch.setattr(DingTalkWebhookService, "_send_webhook", fake_send)
+    client = create_test_client(make_sqlite_url(tmp_path, "pages-deliveries-retry.db"))
+
+    with SessionFactoryHolder.factory() as session:
+        subscription = Subscription(
+            code="hr-daily",
+            channel="dingtalk",
+            business_lines=["HR情报源"],
+            keywords=["校招"],
+        )
+        content_item = ContentItem(
+            dedupe_key="page-content-retry-1",
+            title="校招信息汇总",
+            canonical_url="https://example.com/page-content-retry-1",
+            tags=["HR情报源"],
+            raw_payload={},
+        )
+        session.add_all([subscription, content_item])
+        session.flush()
+        delivery = DeliveryRecord(
+            subscription_id=subscription.id,
+            content_item_id=content_item.id,
+            status="failed",
+            error_message="webhook failed",
+        )
+        session.add(delivery)
+        session.commit()
+        delivery_id = str(delivery.id)
+
+    page = client.get("/deliveries?status=failed")
+    response = client.post(f"/deliveries/{delivery_id}/retry", data={"status": "failed"}, follow_redirects=False)
+
+    assert page.status_code == 200
+    assert "重试" in page.text
+    assert response.status_code == 303
+    assert response.headers["location"] == "/deliveries?status=failed"
+    assert len(requests) == 1
+
+    with SessionFactoryHolder.factory() as session:
+        refreshed = session.get(DeliveryRecord, UUID(delivery_id))
+        assert refreshed is not None
+        assert refreshed.status == "sent"
+        assert refreshed.error_message is None
+
+
+def test_deliveries_page_can_retry_failed_records_in_batch(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("ENABLE_DINGTALK_NOTIFIER", "true")
+    monkeypatch.setenv("DINGTALK_WEBHOOK", "https://oapi.dingtalk.com/robot/send?access_token=test-token")
+    requests: list[dict[str, object]] = []
+
+    def fake_send(self, webhook: str, payload: dict[str, object], timeout_seconds: float, secret: str | None) -> None:
+        requests.append({"webhook": webhook, "payload": payload, "secret": secret})
+
+    monkeypatch.setattr(DingTalkWebhookService, "_send_webhook", fake_send)
+    client = create_test_client(make_sqlite_url(tmp_path, "pages-deliveries-retry-batch.db"))
+
+    with SessionFactoryHolder.factory() as session:
+        target_subscription = Subscription(
+            code="hr-daily",
+            channel="dingtalk",
+            business_lines=["HR情报源"],
+            keywords=["校招"],
+        )
+        other_subscription = Subscription(
+            code="market-daily",
+            channel="email",
+            business_lines=["市场情报源"],
+            keywords=["版号"],
+        )
+        first_content = ContentItem(
+            dedupe_key="page-content-retry-batch-1",
+            title="校招信息A",
+            canonical_url="https://example.com/page-content-retry-batch-1",
+            tags=["HR情报源"],
+            raw_payload={},
+        )
+        second_content = ContentItem(
+            dedupe_key="page-content-retry-batch-2",
+            title="版号信息B",
+            canonical_url="https://example.com/page-content-retry-batch-2",
+            tags=["市场情报源"],
+            raw_payload={},
+        )
+        session.add_all([target_subscription, other_subscription, first_content, second_content])
+        session.flush()
+        session.add_all(
+            [
+                DeliveryRecord(
+                    subscription_id=target_subscription.id,
+                    content_item_id=first_content.id,
+                    status="failed",
+                    error_message="webhook failed",
+                ),
+                DeliveryRecord(
+                    subscription_id=other_subscription.id,
+                    content_item_id=second_content.id,
+                    status="failed",
+                    error_message="webhook failed",
+                ),
+            ]
+        )
+        session.commit()
+
+    page = client.get("/deliveries?status=failed&subscription_code=hr&channel=dingtalk")
+    response = client.post(
+        "/deliveries/retry-failed",
+        data={"status": "failed", "subscription_code": "hr", "channel": "dingtalk"},
+        follow_redirects=False,
+    )
+
+    assert page.status_code == 200
+    assert "批量重试失败项" in page.text
+    assert response.status_code == 303
+    assert response.headers["location"] == "/deliveries?subscription_code=hr&status=failed&channel=dingtalk&retried_count=1"
+    assert len(requests) == 1
+
+    with SessionFactoryHolder.factory() as session:
+        records = list(session.scalars(select(DeliveryRecord).order_by(DeliveryRecord.created_at.asc())).all())
+        assert [record.status for record in records] == ["sent", "failed"]
 
 
 def test_source_edit_page_shows_common_edit_fields(tmp_path) -> None:

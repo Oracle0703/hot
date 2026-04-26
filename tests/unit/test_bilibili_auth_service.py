@@ -5,13 +5,13 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
-from app.runtime_paths import get_runtime_paths
 from app.services.bilibili_auth_service import BilibiliBrowserAuthService
+from app.services.auth_state_service import AuthStateService
 
 
 def test_bilibili_browser_auth_service_syncs_cookie_and_storage_state(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv('HOT_RUNTIME_ROOT', str(tmp_path))
     monkeypatch.delenv('BILIBILI_COOKIE', raising=False)
+    auth_state_service = AuthStateService(runtime_root=tmp_path)
 
     class _FakePage:
         async def goto(self, url: str, wait_until: str, timeout: int):
@@ -65,20 +65,19 @@ def test_bilibili_browser_auth_service_syncs_cookie_and_storage_state(tmp_path, 
     fake_module.async_playwright = lambda: _FakePlaywrightContext(chromium)
     monkeypatch.setitem(sys.modules, 'playwright.async_api', fake_module)
 
-    result = BilibiliBrowserAuthService().login_and_sync()
-    runtime_paths = get_runtime_paths(tmp_path)
-    env_text = runtime_paths.env_file.read_text(encoding='utf-8')
+    result = BilibiliBrowserAuthService(auth_state_service=auth_state_service).login_and_sync()
+    auth_paths = auth_state_service.build_paths("bilibili")
+    env_file = tmp_path / 'data' / 'app.env'
+    env_text = env_file.read_text(encoding='utf-8')
 
     assert result.cookie.startswith('SESSDATA=test-sess')
     assert 'BILIBILI_COOKIE=SESSDATA=test-sess; bili_jct=test-jct; DedeUserID=123' in env_text
-    assert context.storage_state_path == str(runtime_paths.bilibili_storage_state_file)
-    assert chromium.user_data_dir == str(runtime_paths.bilibili_user_data_dir)
+    assert context.storage_state_path == str(auth_paths.storage_state_file)
+    assert chromium.user_data_dir == str(auth_paths.user_data_dir)
     assert chromium.launch_kwargs['headless'] is False
 
 
 def test_bilibili_browser_auth_service_raises_when_login_times_out(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv('HOT_RUNTIME_ROOT', str(tmp_path))
-
     class _FakePage:
         async def goto(self, url: str, wait_until: str, timeout: int):
             return None
@@ -121,4 +120,8 @@ def test_bilibili_browser_auth_service_raises_when_login_times_out(tmp_path, mon
     monkeypatch.setitem(sys.modules, 'playwright.async_api', fake_module)
 
     with pytest.raises(RuntimeError, match='登录超时|SESSDATA'):
-        BilibiliBrowserAuthService(login_timeout_ms=10, poll_interval_ms=1).login_and_sync()
+        BilibiliBrowserAuthService(
+            auth_state_service=AuthStateService(runtime_root=tmp_path),
+            login_timeout_ms=10,
+            poll_interval_ms=1,
+        ).login_and_sync()

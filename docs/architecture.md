@@ -17,7 +17,7 @@
 
 | 层级 | 主要路径 | 职责 |
 | --- | --- | --- |
-| 启动层 | `launcher.py`、`scripts/run.ps1` | 准备运行环境、启动服务、打开浏览器、记录启动日志 |
+| 启动层 | `launcher.py`、`scripts/run.ps1`、`scripts/status.ps1`、`scripts/stop.ps1` | 准备运行环境、启动服务、打开浏览器、记录启动日志，并通过 dry-run / probe / stop JSON 输出向桌面壳和运维脚本暴露稳定的本地控制面 |
 | 应用层 | `app/main.py` | 组装 FastAPI 应用、生命周期、数据库初始化和调度器 |
 | 路由层 | `app/api/` | 提供页面路由和 API 路由 |
 | 服务层 | `app/services/` | 承载业务流程，包括来源、任务、报告、调度、配置、通知 |
@@ -81,4 +81,3 @@
 | 存储 | 默认 SQLite，可配置 MySQL |
 | 部署 | 固定电脑本地运行，暂不按 SaaS 多租户设计 |
 | 打包 | PyInstaller `onedir`，不追求单文件 exe |
-

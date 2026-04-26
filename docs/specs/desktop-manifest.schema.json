@@ -1,0 +1,341 @@
+{
+  "$defs": {
+    "ControlManifest": {
+      "additionalProperties": false,
+      "properties": {
+        "launch": {
+          "$ref": "#/$defs/LaunchControlManifest"
+        },
+        "probe": {
+          "$ref": "#/$defs/ProbeControlManifest"
+        },
+        "stop": {
+          "$ref": "#/$defs/StopControlManifest"
+        }
+      },
+      "required": [
+        "launch",
+        "probe",
+        "stop"
+      ],
+      "title": "ControlManifest",
+      "type": "object"
+    },
+    "LaunchControlManifest": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "launcher-start",
+          "title": "Kind",
+          "type": "string"
+        },
+        "launcher_path": {
+          "title": "Launcher Path",
+          "type": "string"
+        },
+        "source_entry_path": {
+          "title": "Source Entry Path",
+          "type": "string"
+        },
+        "release_bat_path": {
+          "title": "Release Bat Path",
+          "type": "string"
+        },
+        "preferred_path": {
+          "title": "Preferred Path",
+          "type": "string"
+        },
+        "launch_mode": {
+          "enum": [
+            "batch-file",
+            "native-executable",
+            "python-script"
+          ],
+          "title": "Launch Mode",
+          "type": "string"
+        },
+        "preferred_args": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Preferred Args",
+          "type": "array"
+        },
+        "default_args": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Default Args",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "launcher_path",
+        "source_entry_path",
+        "release_bat_path",
+        "preferred_path",
+        "launch_mode",
+        "preferred_args",
+        "default_args"
+      ],
+      "title": "LaunchControlManifest",
+      "type": "object"
+    },
+    "NavigationItem": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "href": {
+          "title": "Href",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "href"
+      ],
+      "title": "NavigationItem",
+      "type": "object"
+    },
+    "ProbeControlManifest": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "launcher-probe",
+          "title": "Kind",
+          "type": "string"
+        },
+        "script_path": {
+          "title": "Script Path",
+          "type": "string"
+        },
+        "release_bat_path": {
+          "title": "Release Bat Path",
+          "type": "string"
+        },
+        "preferred_path": {
+          "title": "Preferred Path",
+          "type": "string"
+        },
+        "launch_mode": {
+          "enum": [
+            "batch-file",
+            "powershell-file"
+          ],
+          "title": "Launch Mode",
+          "type": "string"
+        },
+        "preferred_args": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Preferred Args",
+          "type": "array"
+        },
+        "default_args": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Default Args",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "script_path",
+        "release_bat_path",
+        "preferred_path",
+        "launch_mode",
+        "preferred_args",
+        "default_args"
+      ],
+      "title": "ProbeControlManifest",
+      "type": "object"
+    },
+    "RuntimeManifest": {
+      "additionalProperties": false,
+      "properties": {
+        "runtime_root": {
+          "title": "Runtime Root",
+          "type": "string"
+        },
+        "reports_root": {
+          "title": "Reports Root",
+          "type": "string"
+        },
+        "pid_file": {
+          "title": "Pid File",
+          "type": "string"
+        }
+      },
+      "required": [
+        "runtime_root",
+        "reports_root",
+        "pid_file"
+      ],
+      "title": "RuntimeManifest",
+      "type": "object"
+    },
+    "ServiceManifest": {
+      "additionalProperties": false,
+      "properties": {
+        "entry_url": {
+          "title": "Entry Url",
+          "type": "string"
+        },
+        "desktop_manifest_url": {
+          "title": "Desktop Manifest Url",
+          "type": "string"
+        },
+        "health_url": {
+          "title": "Health Url",
+          "type": "string"
+        },
+        "docs_url": {
+          "title": "Docs Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "entry_url",
+        "desktop_manifest_url",
+        "health_url",
+        "docs_url"
+      ],
+      "title": "ServiceManifest",
+      "type": "object"
+    },
+    "StopControlManifest": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "stop-script",
+          "title": "Kind",
+          "type": "string"
+        },
+        "script_path": {
+          "title": "Script Path",
+          "type": "string"
+        },
+        "release_bat_path": {
+          "title": "Release Bat Path",
+          "type": "string"
+        },
+        "preferred_path": {
+          "title": "Preferred Path",
+          "type": "string"
+        },
+        "launch_mode": {
+          "enum": [
+            "batch-file",
+            "powershell-file"
+          ],
+          "title": "Launch Mode",
+          "type": "string"
+        },
+        "preferred_args": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Preferred Args",
+          "type": "array"
+        },
+        "default_args": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Default Args",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "script_path",
+        "release_bat_path",
+        "preferred_path",
+        "launch_mode",
+        "preferred_args",
+        "default_args"
+      ],
+      "title": "StopControlManifest",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "kind": {
+      "const": "desktop-shell-manifest",
+      "title": "Kind",
+      "type": "string"
+    },
+    "app_name": {
+      "title": "App Name",
+      "type": "string"
+    },
+    "app_env": {
+      "title": "App Env",
+      "type": "string"
+    },
+    "version": {
+      "title": "Version",
+      "type": "string"
+    },
+    "entry_route": {
+      "title": "Entry Route",
+      "type": "string"
+    },
+    "info_route": {
+      "title": "Info Route",
+      "type": "string"
+    },
+    "health_route": {
+      "title": "Health Route",
+      "type": "string"
+    },
+    "docs_route": {
+      "title": "Docs Route",
+      "type": "string"
+    },
+    "navigation": {
+      "items": {
+        "$ref": "#/$defs/NavigationItem"
+      },
+      "title": "Navigation",
+      "type": "array"
+    },
+    "runtime": {
+      "$ref": "#/$defs/RuntimeManifest"
+    },
+    "service": {
+      "$ref": "#/$defs/ServiceManifest"
+    },
+    "control": {
+      "$ref": "#/$defs/ControlManifest"
+    }
+  },
+  "required": [
+    "kind",
+    "app_name",
+    "app_env",
+    "version",
+    "entry_route",
+    "info_route",
+    "health_route",
+    "docs_route",
+    "navigation",
+    "runtime",
+    "service",
+    "control"
+  ],
+  "title": "DesktopManifest",
+  "type": "object"
+}

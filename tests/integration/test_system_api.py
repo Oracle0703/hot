@@ -5,6 +5,11 @@ See docs/specs/api-reference.md and docs/test-cases.md.
 
 from __future__ import annotations
 
+import os
+import subprocess
+import json
+from pathlib import Path
+
 import pytest
 
 from tests.conftest import create_test_client, make_sqlite_url
@@ -48,6 +53,129 @@ def test_system_health_extended_returns_status_and_issues(tmp_path) -> None:
     assert "disk" in payload
     assert "issues" in payload
     assert isinstance(payload["issues"], list)
+
+
+def test_system_desktop_manifest_exposes_shell_routes(tmp_path) -> None:
+    client = create_test_client(make_sqlite_url(tmp_path))
+
+    response = client.get("/system/desktop-manifest")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["kind"] == "desktop-shell-manifest"
+    assert payload["entry_route"] == "/"
+    assert payload["health_route"] == "/system/health/extended"
+    assert payload["docs_route"] == "/docs"
+    assert payload["service"]["entry_url"] == "http://testserver/"
+    assert payload["service"]["desktop_manifest_url"] == "http://testserver/system/desktop-manifest"
+    assert payload["service"]["health_url"] == "http://testserver/system/health/extended"
+    assert payload["service"]["docs_url"] == "http://testserver/docs"
+    assert any(item["href"] == "/content-center" for item in payload["navigation"])
+    assert any(item["href"] == "/deliveries" for item in payload["navigation"])
+    assert payload["control"]["launch"]["kind"] == "launcher-start"
+    assert payload["control"]["launch"]["launcher_path"].endswith("HotCollectorLauncher.exe")
+    assert payload["control"]["launch"]["source_entry_path"].endswith("launcher.py")
+    assert payload["control"]["launch"]["release_bat_path"].endswith("启动系统.bat")
+    assert payload["control"]["launch"]["preferred_path"].endswith("launcher.py")
+    assert payload["control"]["launch"]["launch_mode"] == "python-script"
+    assert payload["control"]["launch"]["preferred_args"] == []
+    assert payload["control"]["probe"]["kind"] == "launcher-probe"
+    assert payload["control"]["probe"]["script_path"].endswith("scripts\\status.ps1")
+    assert payload["control"]["probe"]["default_args"] == ["-PrintJson"]
+    assert payload["control"]["probe"]["release_bat_path"].endswith("查看状态.bat")
+    assert payload["control"]["probe"]["preferred_path"].endswith("scripts\\status.ps1")
+    assert payload["control"]["probe"]["launch_mode"] == "powershell-file"
+    assert payload["control"]["probe"]["preferred_args"] == ["-PrintJson"]
+    assert payload["control"]["stop"]["kind"] == "stop-script"
+    assert payload["control"]["stop"]["script_path"].endswith("scripts\\stop.ps1")
+    assert payload["control"]["stop"]["default_args"] == ["-PrintJson"]
+    assert payload["control"]["stop"]["release_bat_path"].endswith("停止系统.bat")
+    assert payload["control"]["stop"]["preferred_path"].endswith("scripts\\stop.ps1")
+    assert payload["control"]["stop"]["launch_mode"] == "powershell-file"
+    assert payload["control"]["stop"]["preferred_args"] == ["-PrintJson"]
+
+
+def test_system_desktop_manifest_prefers_release_entrypoints_in_packaged_runtime(tmp_path) -> None:
+    from tests.integration.test_scripts import PREPARE, ROOT, run_ps1
+
+    dist_root = ROOT / "tmp_test_manifest_release_dist"
+    release_root = ROOT / "tmp_test_manifest_release_out"
+    previous_runtime_root = os.environ.get("HOT_RUNTIME_ROOT")
+    previous_runtime_root_is_auto = os.environ.get("_CODEX_TEST_AUTO_RUNTIME_ROOT")
+    try:
+        if dist_root.exists():
+            subprocess.run(["powershell", "-Command", f"Remove-Item -Recurse -Force '{dist_root}'"], check=False)
+        if release_root.exists():
+            subprocess.run(["powershell", "-Command", f"Remove-Item -Recurse -Force '{release_root}'"], check=False)
+
+        dist_root.mkdir(parents=True, exist_ok=True)
+        (dist_root / "HotCollectorLauncher.exe").write_text("stub", encoding="utf-8")
+
+        result = run_ps1(
+            PREPARE,
+            "-ReleaseRoot",
+            str(release_root.relative_to(ROOT)),
+            "-DistRoot",
+            str(dist_root.relative_to(ROOT)),
+        )
+        assert result.returncode == 0
+
+        db_url = f"sqlite:///{(release_root / 'data' / 'test.db').as_posix()}"
+        os.environ["HOT_RUNTIME_ROOT"] = str(release_root)
+        os.environ["_CODEX_TEST_AUTO_RUNTIME_ROOT"] = "0"
+        client = create_test_client(db_url)
+
+        response = client.get("/system/desktop-manifest")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["runtime"]["runtime_root"] == str(release_root)
+        assert payload["control"]["launch"]["preferred_path"] == str(release_root / "启动系统.bat")
+        assert payload["control"]["launch"]["launch_mode"] == "batch-file"
+        assert payload["control"]["launch"]["preferred_args"] == []
+        assert payload["control"]["probe"]["preferred_path"] == str(release_root / "查看状态.bat")
+        assert payload["control"]["probe"]["launch_mode"] == "batch-file"
+        assert payload["control"]["probe"]["preferred_args"] == []
+        assert payload["control"]["stop"]["preferred_path"] == str(release_root / "停止系统.bat")
+        assert payload["control"]["stop"]["launch_mode"] == "batch-file"
+        assert payload["control"]["stop"]["preferred_args"] == ["-PrintJson"]
+    finally:
+        if previous_runtime_root is None:
+            os.environ.pop("HOT_RUNTIME_ROOT", None)
+        else:
+            os.environ["HOT_RUNTIME_ROOT"] = previous_runtime_root
+        if previous_runtime_root_is_auto is None:
+            os.environ.pop("_CODEX_TEST_AUTO_RUNTIME_ROOT", None)
+        else:
+            os.environ["_CODEX_TEST_AUTO_RUNTIME_ROOT"] = previous_runtime_root_is_auto
+        if dist_root.exists():
+            subprocess.run(["powershell", "-Command", f"Remove-Item -Recurse -Force '{dist_root}'"], check=False)
+        if release_root.exists():
+            subprocess.run(["powershell", "-Command", f"Remove-Item -Recurse -Force '{release_root}'"], check=False)
+
+
+def test_system_desktop_manifest_response_matches_schema_model(tmp_path) -> None:
+    from app.schemas.system_manifest import DesktopManifest
+
+    client = create_test_client(make_sqlite_url(tmp_path))
+
+    response = client.get("/system/desktop-manifest")
+
+    assert response.status_code == 200
+    manifest = DesktopManifest.model_validate(response.json())
+    assert manifest.kind == "desktop-shell-manifest"
+    assert manifest.control.probe.kind == "launcher-probe"
+
+
+def test_desktop_manifest_schema_file_matches_model_export() -> None:
+    from app.schemas.system_manifest import DesktopManifest
+
+    schema_path = Path("docs/specs/desktop-manifest.schema.json")
+
+    assert schema_path.exists()
+    expected = DesktopManifest.model_json_schema()
+    actual = json.loads(schema_path.read_text(encoding="utf-8"))
+    assert actual == expected
 
 
 def test_cancel_running_job_returns_no_running_when_idle(tmp_path) -> None:

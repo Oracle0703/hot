@@ -4,6 +4,7 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
+from app.services.auth_state_service import AuthStateService
 from app.services.strategies.bilibili_profile_videos_recent import (
     BilibiliProfileVideosRecentStrategy,
     _PlaywrightBilibiliProfileRunner,
@@ -705,10 +706,10 @@ def test_bilibili_profile_runner_falls_back_to_html_when_api_hits_risk_control(m
 
 
 def test_bilibili_profile_runner_prefers_runtime_storage_state_when_present(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
-    runner = _PlaywrightBilibiliProfileRunner()
-    monkeypatch.setenv('HOT_RUNTIME_ROOT', str(tmp_path))
+    auth_state_service = AuthStateService(runtime_root=tmp_path)
+    runner = _PlaywrightBilibiliProfileRunner(auth_state_service=auth_state_service)
     monkeypatch.setenv('BILIBILI_COOKIE', 'SESSDATA=test-sess; bili_jct=test-jct; DedeUserID=123')
-    storage_state_file = tmp_path / 'data' / 'bilibili-storage-state.json'
+    storage_state_file = auth_state_service.build_paths("bilibili").storage_state_file
     storage_state_file.parent.mkdir(parents=True, exist_ok=True)
     storage_state_file.write_text('{"cookies":[],"origins":[]}', encoding='utf-8')
 

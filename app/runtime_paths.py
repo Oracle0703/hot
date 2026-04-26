@@ -45,14 +45,15 @@ def detect_runtime_root(explicit_root: str | Path | None = None) -> Path:
 
 
 def get_runtime_paths(explicit_root: str | Path | None = None) -> RuntimePaths:
+    from app.services.auth_state_service import AuthStateService
+
     runtime_root = detect_runtime_root(explicit_root)
     data_dir = runtime_root / "data"
     logs_dir = runtime_root / "logs"
     outputs_dir = runtime_root / "outputs"
     reports_dir = outputs_dir / "reports"
     playwright_browsers_dir = runtime_root / "playwright-browsers"
-    bilibili_user_data_dir = data_dir / "bilibili-user-data"
-    bilibili_storage_state_file = data_dir / "bilibili-storage-state.json"
+    bilibili_auth_paths = AuthStateService(runtime_root=runtime_root).build_paths("bilibili")
     env_file = data_dir / "app.env"
     pid_file = data_dir / "launcher.pid"
     launcher_log_file = logs_dir / "launcher.log"
@@ -64,8 +65,8 @@ def get_runtime_paths(explicit_root: str | Path | None = None) -> RuntimePaths:
         outputs_dir=outputs_dir,
         reports_dir=reports_dir,
         playwright_browsers_dir=playwright_browsers_dir,
-        bilibili_user_data_dir=bilibili_user_data_dir,
-        bilibili_storage_state_file=bilibili_storage_state_file,
+        bilibili_user_data_dir=bilibili_auth_paths.user_data_dir,
+        bilibili_storage_state_file=bilibili_auth_paths.storage_state_file,
         env_file=env_file,
         pid_file=pid_file,
         launcher_log_file=launcher_log_file,

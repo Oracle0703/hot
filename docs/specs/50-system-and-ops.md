@@ -50,10 +50,12 @@
 
 | 脚本                      | 行为                                                                   |
 | ------------------------- | ---------------------------------------------------------------------- |
-| `scripts/stop.ps1`        | 读取 `data/launcher.pid`，发送 `Stop-Process`，等待退出，删除 PID 文件 |
+| `scripts/status.ps1`      | 统一调用 `launcher.py --probe` / `HotCollectorLauncher.exe --probe` 探测本地实例状态；`-PrintJson` 透传结构化状态结果 |
+| `scripts/stop.ps1`        | 读取 `data/launcher.pid`，并结合本地端口探测判断是否 stale PID；仅在确认实例仍监听时发送 `Stop-Process`，否则只清理 PID 文件；`-PrintJson` 可输出结构化停止结果 |
+| `scripts/status_system.bat` | 调用 `status.ps1`，用于批处理或外部壳层接入 |
 | `scripts/stop_system.bat` | 调用 `stop.ps1`，无窗口提示                                            |
 
-发布脚本（`prepare_release.ps1`、`build_offline_release.ps1`）将这两个脚本拷贝到发布目录，与"启动系统.bat"对齐。
+发布脚本（`prepare_release.ps1`、`build_offline_release.ps1`）会在发布目录生成 `查看状态.bat`、`停止系统.bat` 等用户侧入口，与"启动系统.bat"对齐。
 
 ## 50.6 系统状态卡片（REQ-SYS-040）
 

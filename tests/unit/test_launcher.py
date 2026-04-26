@@ -2,7 +2,14 @@
 
 from pathlib import Path
 
-from launcher import build_browser_url, build_runtime_environment, load_env_file
+from launcher import (
+    build_browser_url,
+    build_dry_run_summary,
+    build_local_service_urls,
+    build_probe_summary,
+    build_runtime_environment,
+    load_env_file,
+)
 from app.runtime_paths import RuntimePaths
 
 
@@ -106,3 +113,51 @@ def test_build_runtime_environment_reads_weekly_settings_from_process_env(tmp_pa
 
 def test_build_browser_url_uses_loopback_for_wildcard_host() -> None:
     assert build_browser_url('0.0.0.0', 38080) == 'http://127.0.0.1:38080/'
+
+
+def test_build_local_service_urls_uses_same_local_base() -> None:
+    urls = build_local_service_urls('0.0.0.0', 38080)
+
+    assert urls == {
+        'entry_url': 'http://127.0.0.1:38080/',
+        'desktop_manifest_url': 'http://127.0.0.1:38080/system/desktop-manifest',
+        'health_url': 'http://127.0.0.1:38080/system/health/extended',
+        'docs_url': 'http://127.0.0.1:38080/docs',
+    }
+
+
+def test_build_dry_run_summary_merges_runtime_and_service_urls(tmp_path) -> None:
+    paths = make_runtime_paths(tmp_path)
+    runtime_env = build_runtime_environment(paths, file_values={}, process_env={})
+    service_urls = build_local_service_urls('127.0.0.1', 39090)
+
+    summary = build_dry_run_summary(paths, runtime_env, service_urls)
+
+    assert summary["runtime_root"] == str(tmp_path)
+    assert summary["entry_url"] == "http://127.0.0.1:39090/"
+    assert summary["desktop_manifest_url"] == "http://127.0.0.1:39090/system/desktop-manifest"
+    assert summary["health_url"] == "http://127.0.0.1:39090/system/health/extended"
+    assert summary["docs_url"] == "http://127.0.0.1:39090/docs"
+    assert summary["database"] == f"sqlite:///{(tmp_path / 'data' / 'hot_topics.db').as_posix()}"
+
+
+def test_build_probe_summary_marks_stale_pid_when_port_closed(tmp_path) -> None:
+    paths = make_runtime_paths(tmp_path)
+    service_urls = build_local_service_urls('127.0.0.1', 39090)
+
+    summary = build_probe_summary(
+        paths,
+        service_urls,
+        target_host='127.0.0.1',
+        port=39090,
+        running=False,
+        pid=4321,
+    )
+
+    assert summary["kind"] == "launcher-probe"
+    assert summary["running"] is False
+    assert summary["pid"] == 4321
+    assert summary["pid_file_exists"] is True
+    assert summary["stale_pid_file"] is True
+    assert summary["target_host"] == "127.0.0.1"
+    assert summary["port"] == 39090

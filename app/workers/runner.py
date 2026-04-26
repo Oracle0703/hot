@@ -16,7 +16,10 @@ from app.models.job import CollectionJob
 from app.models.job_log import JobLog
 from app.models.source import Source
 from app.services import cancel_registry
+from app.services.circuit_breaker_service import CircuitBreakerService
+from app.services.content_dispatch_service import ContentDispatchService
 from app.services.dingtalk_webhook_service import DingTalkWebhookService
+from app.services.failure_classifier import FailureClassifier, FailureCode
 from app.services.report_distribution_service import ReportDistributionService
 from app.services.report_service import ReportService
 from app.services.weekly_cover_cache_service import WeeklyCoverCacheService
@@ -30,12 +33,16 @@ class JobRunner:
         notification_scheduler: Callable[[Callable[[], None]], None] | None = None,
         settings_provider: Callable[[], object] | None = None,
         sleeper: Callable[[float], None] | None = None,
+        failure_classifier: FailureClassifier | None = None,
+        circuit_breaker: CircuitBreakerService | None = None,
     ) -> None:
         self.session_factory = session_factory
         self.source_executor = source_executor
         self.notification_scheduler = notification_scheduler or self._schedule_notification_background
         self.settings_provider = settings_provider or get_settings
         self.sleeper = sleeper or time.sleep
+        self.failure_classifier = failure_classifier or FailureClassifier()
+        self.circuit_breaker = circuit_breaker or CircuitBreakerService()
         self.reports_root = get_reports_root()
 
     def run_once(self) -> UUID | None:
@@ -92,9 +99,25 @@ class JobRunner:
                         self._sleep_before_source(source)
                 job.current_source = source.name
                 session.commit()
+                breaker_bucket = self._build_circuit_breaker_bucket(source)
+
+                if self.circuit_breaker.is_open(breaker_bucket):
+                    job.completed_sources += 1
+                    job.failed_sources += 1
+                    session.add(
+                        JobLog(
+                            job_id=job.id,
+                            source_id=source.id,
+                            level="error",
+                            message=f"[{FailureCode.RISK_CONTROL}] source blocked by circuit breaker",
+                        )
+                    )
+                    session.commit()
+                    continue
 
                 try:
                     result = self.source_executor(source)
+                    self.circuit_breaker.record_success(breaker_bucket)
                     source_runs.append(
                         {
                             "source_id": source.id,
@@ -106,6 +129,8 @@ class JobRunner:
                     job.completed_sources += 1
                     job.success_sources += 1
                 except Exception as exc:  # noqa: BLE001
+                    failure = self.failure_classifier.classify(exc)
+                    self.circuit_breaker.record_failure(breaker_bucket, failure.code)
                     job.completed_sources += 1
                     job.failed_sources += 1
                     session.add(
@@ -113,7 +138,7 @@ class JobRunner:
                             job_id=job.id,
                             source_id=source.id,
                             level="error",
-                            message=str(exc),
+                            message=f"[{failure.code}] {failure.message}",
                         )
                     )
                 session.commit()
@@ -130,8 +155,9 @@ class JobRunner:
             else:
                 job.status = "success"
 
+            report_service = ReportService(session, reports_root=self.reports_root)
             try:
-                report = ReportService(session, reports_root=self.reports_root).generate_for_job(job, source_runs)
+                report = report_service.generate_for_job(job, source_runs)
             except Exception as exc:  # noqa: BLE001
                 session.rollback()
                 job = session.get(CollectionJob, job.id)
@@ -149,6 +175,22 @@ class JobRunner:
                 )
                 session.commit()
                 raise
+
+            try:
+                self._dispatch_content_items(session, report_service.last_content_item_ids)
+            except Exception as exc:  # noqa: BLE001
+                session.rollback()
+                job = session.get(CollectionJob, job.id)
+                if job is None:
+                    raise
+                session.add(
+                    JobLog(
+                        job_id=job.id,
+                        level="warning",
+                        message=f"content dispatch failed: {exc}",
+                    )
+                )
+                session.commit()
 
             try:
                 ReportDistributionService().copy_report_to_share_dir(report)
@@ -197,9 +239,25 @@ class JobRunner:
         host = urlsplit(str(getattr(source, 'entry_url', '') or '')).netloc.lower()
         return host.endswith('bilibili.com')
 
+    def _build_circuit_breaker_bucket(self, source: Source) -> str:
+        platform = str(getattr(source, "site_name", "") or "").strip().lower()
+        if not platform:
+            host = urlsplit(str(getattr(source, "entry_url", "") or "")).netloc.lower()
+            if host.startswith("www."):
+                host = host[4:]
+            platform = host.split(".", 1)[0] or "unknown"
+        return f"{platform}:single-user"
+
     def _schedule_notification_background(self, task: Callable[[], None]) -> None:
         thread = threading.Thread(target=task, daemon=True)
         thread.start()
+
+    def _dispatch_content_items(self, session, content_item_ids: list[UUID]) -> None:
+        if not content_item_ids:
+            return
+        dispatcher = ContentDispatchService(session, settings=self.settings_provider())
+        for content_item_id in content_item_ids:
+            dispatcher.dispatch_content_item(content_item_id)
 
     def _prune_weekly_cover_cache(self, session) -> None:
         settings = self.settings_provider()

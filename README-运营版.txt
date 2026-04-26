@@ -41,22 +41,26 @@
 1. 双击“停止系统.bat”
 2. 或直接关闭启动窗口
 
-六、遇到问题先看哪里
+六、如何查看当前状态
+1. 如需确认系统是否还在运行，可双击“查看状态.bat”
+2. 打开的窗口会输出一段 JSON，其中 `running=true` 表示本机实例仍在运行
+3. 如果看到 `stale_pid_file=true`，说明旧 PID 文件已过期，可联系技术同学确认后清理
+七、遇到问题先看哪里
 1. 先看 logs\launcher.log
 2. 如果系统页面能打开，但抓取失败，请把任务详情页和日志一起发给技术同学
 3. 如果 B站任务提示登录失效或风控，先到“定时调度”页面点“打开浏览器登录并同步”再试
 
-七、依赖说明
+八、依赖说明
 1. 发布包已经内置 Python 运行环境与 Playwright 浏览器
 2. “安装依赖.bat”主要用于补齐 Microsoft Visual C++ x64 运行库
 3. 如果公司安全策略拦截运行库安装，请联系 IT 放行
 
-八、快速打开或复制报告
+九、快速打开或复制报告
 1. 双击脚本或执行 scripts\open_latest_report.ps1，可直接打开报告目录
 2. 执行 scripts\open_latest_report.ps1 -OpenDocx，可直接打开最新 DOCX
 3. 执行 scripts\copy_latest_report.ps1 -Destination "目标目录"，可把最新报告复制到共享目录后再手动发群
 
-九、如何覆盖升级但保留原配置
+十、如何覆盖升级但保留原配置
 1. 先双击“停止系统.bat”关闭旧版本
 2. 技术同学会提供“升级包”，里面只包含程序文件，不包含 data、logs、outputs、playwright-browsers
 3. 将升级包里的全部文件直接覆盖到现有安装目录

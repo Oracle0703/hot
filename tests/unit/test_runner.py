@@ -10,13 +10,17 @@ from sqlalchemy import select
 
 from app.db import create_session_factory, get_engine
 from app.models.base import Base
+from app.models.delivery_record import DeliveryRecord
 from app.models.job import CollectionJob
 from app.models.job_log import JobLog
 from app.models.source import Source
+from app.models.subscription import Subscription
+from app.services.failure_classifier import FailureCode
 from app.services.dingtalk_webhook_service import DingTalkWebhookService
 from app.services.job_service import JobService
 from app.services.report_distribution_service import ReportDistributionService
 from app.services.report_service import ReportService
+from app.services.strategies.registry import StrategyError
 from app.services.weekly_cover_cache_service import WeeklyCoverCacheService
 from app.workers.runner import JobRunner
 
@@ -526,6 +530,224 @@ def test_runner_uses_report_root_captured_at_construction(tmp_path, monkeypatch)
 
     assert (original_reports_root / "global" / "hot-report.md").exists()
     assert not (tmp_path / "changed-reports" / "global" / "hot-report.md").exists()
+
+
+def test_runner_logs_structured_failure_code_for_strategy_error(tmp_path) -> None:
+    session_factory = setup_database(tmp_path, "runner-structured-failure.db")
+    with session_factory() as session:
+        session.add(
+            Source(
+                name="B站来源",
+                site_name="Bilibili",
+                entry_url="https://www.bilibili.com/",
+                fetch_mode="http",
+                parser_type="generic_css",
+                max_items=30,
+                enabled=True,
+            )
+        )
+        session.commit()
+        JobService(session).create_manual_job()
+
+    def fail_executor(source: Source) -> dict[str, object]:
+        raise StrategyError(FailureCode.AUTH_EXPIRED, "登录失效")
+
+    runner = JobRunner(session_factory=session_factory, source_executor=fail_executor)
+
+    runner.run_once()
+
+    with session_factory() as session:
+        log = session.scalar(select(JobLog).order_by(JobLog.created_at.asc()))
+        assert log is not None
+        assert log.message == "[AUTH_EXPIRED] 登录失效"
+
+
+def test_runner_skips_source_when_circuit_breaker_is_open(tmp_path) -> None:
+    session_factory = setup_database(tmp_path, "runner-circuit-breaker.db")
+    executed_names: list[str] = []
+    with session_factory() as session:
+        session.add_all(
+            [
+                Source(
+                    id=UUID("00000000-0000-0000-0000-000000000101"),
+                    name="B站来源1",
+                    site_name="Bilibili",
+                    entry_url="https://www.bilibili.com/1",
+                    fetch_mode="http",
+                    parser_type="generic_css",
+                    max_items=30,
+                    enabled=True,
+                ),
+                Source(
+                    id=UUID("00000000-0000-0000-0000-000000000102"),
+                    name="B站来源2",
+                    site_name="Bilibili",
+                    entry_url="https://www.bilibili.com/2",
+                    fetch_mode="http",
+                    parser_type="generic_css",
+                    max_items=30,
+                    enabled=True,
+                ),
+                Source(
+                    id=UUID("00000000-0000-0000-0000-000000000103"),
+                    name="B站来源3",
+                    site_name="Bilibili",
+                    entry_url="https://www.bilibili.com/3",
+                    fetch_mode="http",
+                    parser_type="generic_css",
+                    max_items=30,
+                    enabled=True,
+                ),
+                Source(
+                    id=UUID("00000000-0000-0000-0000-000000000104"),
+                    name="B站来源4",
+                    site_name="Bilibili",
+                    entry_url="https://www.bilibili.com/4",
+                    fetch_mode="http",
+                    parser_type="generic_css",
+                    max_items=30,
+                    enabled=True,
+                ),
+            ]
+        )
+        session.commit()
+        JobService(session).create_manual_job()
+
+    def risk_control_executor(source: Source) -> dict[str, object]:
+        executed_names.append(source.name)
+        raise StrategyError(FailureCode.RISK_CONTROL, "风控")
+
+    runner = JobRunner(session_factory=session_factory, source_executor=risk_control_executor)
+
+    runner.run_once()
+
+    with session_factory() as session:
+        logs = list(session.scalars(select(JobLog).order_by(JobLog.created_at.asc())).all())
+        assert executed_names == ["B站来源1", "B站来源2", "B站来源3"]
+        assert any("circuit breaker" in log.message for log in logs)
+
+
+def test_runner_dispatches_content_items_after_report_generation(tmp_path, monkeypatch) -> None:
+    session_factory = setup_database(tmp_path, "runner-auto-dispatch.db")
+    monkeypatch.setenv("ENABLE_DINGTALK_NOTIFIER", "true")
+    monkeypatch.setenv("DINGTALK_WEBHOOK", "https://oapi.dingtalk.com/robot/send?access_token=dispatch-token")
+    with session_factory() as session:
+        session.add(
+            Source(
+                name="HR情报源",
+                site_name="NGA",
+                entry_url="https://example.com",
+                fetch_mode="http",
+                parser_type="generic_css",
+                max_items=30,
+                enabled=True,
+            )
+        )
+        session.add(
+            Subscription(
+                code="hr-daily",
+                channel="dingtalk",
+                business_lines=["HR情报源"],
+                keywords=["校招"],
+            )
+        )
+        session.commit()
+        JobService(session).create_manual_job()
+
+    sent_payloads: list[dict[str, object]] = []
+
+    def fake_send(self, webhook: str, payload: dict[str, object], timeout_seconds: float, secret: str | None) -> None:
+        sent_payloads.append({"webhook": webhook, "payload": payload, "secret": secret})
+
+    monkeypatch.setattr(DingTalkWebhookService, "_send_webhook", fake_send)
+
+    runner = JobRunner(
+        session_factory=session_factory,
+        source_executor=lambda source: {
+            "item_count": 1,
+            "items": [
+                {
+                    "title": "校招信息汇总",
+                    "url": "https://example.com/post-1",
+                    "published_at": "2026-03-24 10:00",
+                }
+            ],
+        },
+        notification_scheduler=lambda task: None,
+    )
+
+    runner.run_once()
+
+    with session_factory() as session:
+        records = list(session.scalars(select(DeliveryRecord)).all())
+
+        assert len(sent_payloads) == 1
+        assert sent_payloads[0]["webhook"] == "https://oapi.dingtalk.com/robot/send?access_token=dispatch-token"
+        assert len(records) == 1
+        assert records[0].status == "sent"
+
+
+def test_runner_does_not_send_duplicate_delivery_for_repeat_content(tmp_path, monkeypatch) -> None:
+    session_factory = setup_database(tmp_path, "runner-auto-dispatch-repeat.db")
+    monkeypatch.setenv("ENABLE_DINGTALK_NOTIFIER", "true")
+    monkeypatch.setenv("DINGTALK_WEBHOOK", "https://oapi.dingtalk.com/robot/send?access_token=dispatch-token")
+    with session_factory() as session:
+        session.add(
+            Source(
+                name="HR情报源",
+                site_name="NGA",
+                entry_url="https://example.com",
+                fetch_mode="http",
+                parser_type="generic_css",
+                max_items=30,
+                enabled=True,
+            )
+        )
+        session.add(
+            Subscription(
+                code="hr-daily",
+                channel="dingtalk",
+                business_lines=["HR情报源"],
+                keywords=["校招"],
+            )
+        )
+        session.commit()
+        JobService(session).create_manual_job()
+        JobService(session).create_manual_job()
+
+    sent_payloads: list[dict[str, object]] = []
+
+    def fake_send(self, webhook: str, payload: dict[str, object], timeout_seconds: float, secret: str | None) -> None:
+        sent_payloads.append({"webhook": webhook, "payload": payload, "secret": secret})
+
+    monkeypatch.setattr(DingTalkWebhookService, "_send_webhook", fake_send)
+
+    runner = JobRunner(
+        session_factory=session_factory,
+        source_executor=lambda source: {
+            "item_count": 1,
+            "items": [
+                {
+                    "title": "校招信息汇总",
+                    "url": "https://example.com/post-repeat",
+                    "published_at": "2026-03-24 10:00",
+                }
+            ],
+        },
+        notification_scheduler=lambda task: None,
+    )
+
+    first_job_id = runner.run_once()
+    second_job_id = runner.run_once()
+
+    with session_factory() as session:
+        records = list(session.scalars(select(DeliveryRecord)).all())
+
+        assert first_job_id is not None
+        assert second_job_id is not None
+        assert len(sent_payloads) == 1
+        assert len(records) == 1
+        assert records[0].status == "sent"
 
 
 

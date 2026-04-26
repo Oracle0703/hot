@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -169,6 +170,62 @@ def test_stop_system_bat_invokes_ps1(tmp_path):
     assert not pid_file.exists()
 
 
+def test_status_ps1_print_json_reports_stale_pid_state(tmp_path):
+    """状态脚本应透传 launcher probe 的结构化实例状态。"""
+    runtime_root = tmp_path / "runtime"
+    data_dir = runtime_root / "data"
+    data_dir.mkdir(parents=True)
+    (data_dir / "launcher.pid").write_text("4321", encoding="utf-8")
+
+    res = _run_ps(
+        SCRIPTS_DIR / "status.ps1",
+        "-RuntimeRoot", str(runtime_root),
+        "-Port", "39090",
+        "-PrintJson",
+    )
+
+    assert res.returncode == 0, res.stderr or res.stdout
+    payload = json.loads(res.stdout)
+    assert payload["kind"] == "launcher-probe"
+    assert payload["runtime_root"] == str(runtime_root)
+    assert payload["running"] is False
+    assert payload["pid"] == 4321
+    assert payload["pid_file_exists"] is True
+    assert payload["stale_pid_file"] is True
+
+
+def test_status_system_bat_invokes_ps1_and_returns_json(tmp_path):
+    """仓库级 bat 包装脚本应调用 status.ps1。"""
+    runtime_root = tmp_path / "runtime"
+    data_dir = runtime_root / "data"
+    data_dir.mkdir(parents=True)
+    (data_dir / "launcher.pid").write_text("5678", encoding="utf-8")
+
+    res = subprocess.run(
+        [
+            "cmd.exe",
+            "/c",
+            str(SCRIPTS_DIR / "status_system.bat"),
+            "-RuntimeRoot",
+            str(runtime_root),
+            "-Port",
+            "39091",
+            "-PrintJson",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(REPO_ROOT),
+        timeout=30,
+    )
+
+    assert res.returncode == 0, res.stderr or res.stdout
+    payload = json.loads(res.stdout)
+    assert payload["kind"] == "launcher-probe"
+    assert payload["runtime_root"] == str(runtime_root)
+    assert payload["pid"] == 5678
+    assert payload["stale_pid_file"] is True
+
+
 # --- TC-API-301 -----------------------------------------------------------------
 
 def test_stop_ps1_dry_run(tmp_path):
@@ -185,6 +242,75 @@ def test_stop_ps1_dry_run(tmp_path):
     assert res.returncode == 0, res.stderr or res.stdout
     assert "DryRun" in res.stdout
     assert pid_file.exists(), "DryRun 不应删除 PID 文件"
+
+
+def test_stop_ps1_does_not_kill_foreign_process_when_pid_file_is_stale(tmp_path):
+    """stale PID 文件指向无关进程时,脚本只清理 PID 文件,不误杀该进程。"""
+    project = tmp_path / "project"
+    (project / "data").mkdir(parents=True)
+    (project / "scripts").mkdir(parents=True)
+    pid_file = project / "data" / "launcher.pid"
+    shutil.copy2(SCRIPTS_DIR / "stop.ps1", project / "scripts" / "stop.ps1")
+
+    sleeper = subprocess.Popen(
+        ["powershell.exe", "-NoProfile", "-Command", "Start-Sleep -Seconds 30"],
+        cwd=str(project),
+    )
+    try:
+        pid_file.write_text(str(sleeper.pid), encoding="utf-8")
+
+        res = _run_ps(project / "scripts" / "stop.ps1", "-Port", "39090", cwd=project)
+
+        assert res.returncode == 0, res.stderr or res.stdout
+        assert not pid_file.exists()
+        assert sleeper.poll() is None, "stale pid 不应导致外部进程被停止"
+    finally:
+        if sleeper.poll() is None:
+            sleeper.terminate()
+            try:
+                sleeper.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                sleeper.kill()
+
+
+def test_stop_ps1_print_json_reports_stale_pid_cleanup(tmp_path):
+    """结构化输出应明确返回 stale pid 已清理,且不误杀无关进程。"""
+    project = tmp_path / "project"
+    (project / "data").mkdir(parents=True)
+    (project / "scripts").mkdir(parents=True)
+    pid_file = project / "data" / "launcher.pid"
+    shutil.copy2(SCRIPTS_DIR / "stop.ps1", project / "scripts" / "stop.ps1")
+
+    sleeper = subprocess.Popen(
+        ["powershell.exe", "-NoProfile", "-Command", "Start-Sleep -Seconds 30"],
+        cwd=str(project),
+    )
+    try:
+        pid_file.write_text(str(sleeper.pid), encoding="utf-8")
+
+        res = _run_ps(
+            project / "scripts" / "stop.ps1",
+            "-Port", "39090",
+            "-PrintJson",
+            cwd=project,
+        )
+
+        assert res.returncode == 0, res.stderr or res.stdout
+        payload = json.loads(res.stdout)
+        assert payload["kind"] == "stop-script"
+        assert payload["outcome"] == "stale_pid_cleaned"
+        assert payload["pid"] == sleeper.pid
+        assert payload["service_running"] is False
+        assert payload["removed_pid_file"] is True
+        assert not pid_file.exists()
+        assert sleeper.poll() is None, "stale pid 不应导致外部进程被停止"
+    finally:
+        if sleeper.poll() is None:
+            sleeper.terminate()
+            try:
+                sleeper.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                sleeper.kill()
 
 
 # --- TC-API-302 -----------------------------------------------------------------

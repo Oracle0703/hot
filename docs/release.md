@@ -36,6 +36,7 @@
 | `HotCollectorLauncher.exe` | 主启动器             |
 | `_internal/`               | PyInstaller 运行依赖 |
 | `启动系统.bat`             | 运营双击启动入口     |
+| `查看状态.bat`             | 输出当前实例状态 JSON |
 | `停止系统.bat`             | 停止本机运行进程     |
 | `安装依赖.bat`             | 安装 VC++ 运行库     |
 | `data/app.env`             | 默认运行配置模板     |
@@ -57,7 +58,7 @@
 | ---------------- | ------------------------------------- |
 | 不覆盖运行数据   | 不包含 `data/`、`logs/`、`outputs/`   |
 | 不覆盖浏览器状态 | 不包含 `playwright-browsers/`         |
-| 只替换程序文件   | 包含 exe、`_internal/`、启动/停止脚本 |
+| 只替换程序文件   | 包含 exe、`_internal/`、启动/状态/停止脚本 |
 | 保留用户配置     | 原有 `data/app.env` 继续沿用          |
 | 保留数据库       | 原有 `data/hot_topics.db` 继续沿用    |
 

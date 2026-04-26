@@ -19,7 +19,8 @@ from sqlalchemy.orm import sessionmaker
 
 from app.config import get_settings
 from app.models.job import CollectionJob
-from app.runtime_paths import get_runtime_paths
+from app.runtime_paths import RuntimePaths, get_runtime_paths
+from app.schemas.system_manifest import DesktopManifest
 from app.services import cancel_registry
 from app.services.version_service import get_version_info
 
@@ -118,6 +119,65 @@ def _running_job_id() -> str | None:
         return None
 
 
+def _desktop_control_manifest(paths: RuntimePaths) -> dict[str, Any]:
+    scripts_dir = paths.runtime_root / "scripts"
+    launcher_path = paths.runtime_root / "HotCollectorLauncher.exe"
+    source_entry_path = paths.runtime_root / "launcher.py"
+    launch_bat_path = paths.runtime_root / "启动系统.bat"
+    probe_script_path = scripts_dir / "status.ps1"
+    probe_bat_path = paths.runtime_root / "查看状态.bat"
+    stop_script_path = scripts_dir / "stop.ps1"
+    stop_bat_path = paths.runtime_root / "停止系统.bat"
+    preferred_launch_path = (
+        launch_bat_path if launch_bat_path.exists()
+        else launcher_path if launcher_path.exists()
+        else source_entry_path
+    )
+    preferred_probe_path = probe_bat_path if probe_bat_path.exists() else probe_script_path
+    preferred_stop_path = stop_bat_path if stop_bat_path.exists() else stop_script_path
+    return {
+        "launch": {
+            "kind": "launcher-start",
+            "launcher_path": str(launcher_path),
+            "source_entry_path": str(source_entry_path),
+            "release_bat_path": str(launch_bat_path),
+            "preferred_path": str(preferred_launch_path),
+            "launch_mode": "batch-file" if preferred_launch_path == launch_bat_path else "python-script" if preferred_launch_path == source_entry_path else "native-executable",
+            "preferred_args": [],
+            "default_args": [],
+        },
+        "probe": {
+            "kind": "launcher-probe",
+            "script_path": str(probe_script_path),
+            "release_bat_path": str(probe_bat_path),
+            "preferred_path": str(preferred_probe_path),
+            "launch_mode": "batch-file" if preferred_probe_path == probe_bat_path else "powershell-file",
+            "preferred_args": [] if preferred_probe_path == probe_bat_path else ["-PrintJson"],
+            "default_args": ["-PrintJson"],
+        },
+        "stop": {
+            "kind": "stop-script",
+            "script_path": str(stop_script_path),
+            "release_bat_path": str(stop_bat_path),
+            "preferred_path": str(preferred_stop_path),
+            "launch_mode": "batch-file" if preferred_stop_path == stop_bat_path else "powershell-file",
+            "preferred_args": ["-PrintJson"],
+            "default_args": ["-PrintJson"],
+        },
+    }
+
+
+def _desktop_service_manifest(request: Request) -> dict[str, str]:
+    entry_url = str(request.base_url)
+    base_url = entry_url.rstrip("/")
+    return {
+        "entry_url": entry_url,
+        "desktop_manifest_url": f"{base_url}/system/desktop-manifest",
+        "health_url": f"{base_url}/system/health/extended",
+        "docs_url": f"{base_url}/docs",
+    }
+
+
 @router.get("/info")
 def system_info() -> dict[str, Any]:
     info = get_version_info()
@@ -127,6 +187,39 @@ def system_info() -> dict[str, Any]:
     payload["app_env"] = settings.environment
     payload["debug"] = settings.debug
     return payload
+
+
+@router.get("/desktop-manifest")
+def desktop_manifest(request: Request) -> DesktopManifest:
+    info = get_version_info()
+    settings = get_settings()
+    paths = get_runtime_paths()
+    return DesktopManifest(
+        kind="desktop-shell-manifest",
+        app_name=settings.app_name,
+        app_env=settings.environment,
+        version=info.version,
+        entry_route="/",
+        info_route="/system/info",
+        health_route="/system/health/extended",
+        docs_route="/docs",
+        navigation=[
+            {"id": "dashboard", "label": "首页", "href": "/"},
+            {"id": "sources", "label": "采集源", "href": "/sources"},
+            {"id": "reports", "label": "报告", "href": "/reports"},
+            {"id": "content", "label": "内容中心", "href": "/content-center"},
+            {"id": "subscriptions", "label": "订阅中心", "href": "/subscriptions"},
+            {"id": "deliveries", "label": "投递状态", "href": "/deliveries"},
+            {"id": "scheduler", "label": "调度设置", "href": "/scheduler"},
+        ],
+        runtime={
+            "runtime_root": str(paths.runtime_root),
+            "reports_root": str(paths.reports_dir),
+            "pid_file": str(paths.pid_file),
+        },
+        service=_desktop_service_manifest(request),
+        control=_desktop_control_manifest(paths),
+    )
 
 
 @router.get("/health/extended")

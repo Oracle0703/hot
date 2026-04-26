@@ -66,6 +66,8 @@
 | TC-SYS-205 | restore_database 实际恢复     | 合法备份 + 服务停                                         | 主库被替换                                                   | done |
 | TC-SYS-301 | stop.ps1 删 PID 文件          | PID 文件存在                                              | 调用后 PID 文件消失                                          | done |
 | TC-SYS-302 | stop_system.bat 调用 stop.ps1 | bat 调用                                                  | 与 ps1 行为一致                                              | done |
+| TC-SYS-303 | status.ps1 输出结构化状态     | PID 文件存在且端口未监听                                  | 返回 `launcher-probe` JSON 且 `stale_pid_file=true`          | done |
+| TC-SYS-304 | status_system.bat 调用 status.ps1 | bat 调用                                               | 与 ps1 行为一致                                              | done |
 
 ## STRAT — 策略与解析器
 
@@ -144,6 +146,11 @@
 | TC-API-005 | POST /system/jobs/cancel-running 有任务     | 模拟 running                     | 200 + cancelled_job_id=<id>       | done |
 | TC-API-006 | GET /system/config/export?mask=true         | 默认                             | text/yaml + 不含真实 Cookie       | done |
 | TC-API-007 | GET /system/config/export?mask=false 在生产 | APP_DEBUG=false                  | 403                               | done |
+| TC-API-008 | GET /system/desktop-manifest 控制面字段     | 默认                             | 返回 `service`、`control.launch`、`control.probe`、`control.stop` 契约，且含 `preferred_path`、`launch_mode`、`preferred_args` | done |
+| TC-API-009 | GET /system/desktop-manifest 发布目录对齐    | `HOT_RUNTIME_ROOT` 指向发布目录 | `preferred_path` 自动指向 `启动系统.bat` / `查看状态.bat` / `停止系统.bat` | done |
+| TC-API-010 | GET /system/desktop-manifest schema 对齐     | 默认                             | 接口响应可被 `DesktopManifest` 校验，且 `desktop-manifest.schema.json` 与模型导出一致 | done |
+| TC-API-011 | desktop manifest consumer 解析 probe 命令   | 本地 manifest 文件               | 输出 `powershell.exe -File status.ps1 -PrintJson` 命令计划 | done |
+| TC-API-012 | desktop manifest consumer 非法输入失败      | 非法 manifest 文件               | 返回退出码 1，并输出校验错误 | done |
 | TC-API-101 | 配置中心页面渲染                            | GET /scheduler 或 /config-center | 200 + 含每个 group                | done |
 | TC-API-102 | 配置中心保存非法                            | POST 非法字段                    | 422 + 行级错误                    | done |
 | TC-API-103 | 配置中心保存合法                            | POST 合法字段                    | 200 + 文件已写                    | done |

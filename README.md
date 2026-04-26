@@ -11,6 +11,40 @@
 | 3 | `.\scripts\run.ps1` | 启动开发服务，默认访问 `http://127.0.0.1:8000/` |
 | 4 | 页面内配置采集源并执行任务 | 在首页、采集源页、调度页和报告页完成日常操作 |
 
+如需给外部启动器或桌面壳读取本地运行信息，可执行：
+
+```powershell
+.\.venv\Scripts\python.exe launcher.py --dry-run --print-json
+```
+
+输出会包含 `entry_url`、`desktop_manifest_url`、`health_url`、`docs_url`、`database` 等结构化字段。
+
+如需只探测当前本地实例是否已运行，可执行：
+
+```powershell
+.\.venv\Scripts\python.exe launcher.py --probe --print-json
+```
+
+输出会包含 `running`、`pid`、`pid_file_exists`、`stale_pid_file` 等状态字段。
+
+如需通过统一运维脚本探测实例状态，可执行：
+
+```powershell
+.\scripts\status.ps1 -PrintJson
+```
+
+输出会直接透传 `launcher.py --probe --print-json` 的结构化结果，便于安装器、桌面壳或批处理脚本复用。
+
+停止脚本现在也会参考本地端口探测结果；当 `launcher.pid` 指向的进程仍存在、但目标端口未监听时，会把它判定为 stale PID，只清理 PID 文件，不误杀无关进程。
+
+如需让外部壳层或安装器结构化消费停止结果，可执行：
+
+```powershell
+.\scripts\stop.ps1 -PrintJson
+```
+
+输出会包含 `outcome`、`pid`、`removed_pid_file`、`service_running`、`exit_code` 等字段。
+
 如需生成给运营同学使用的完整离线包，可直接执行：
 
 ```powershell
@@ -28,6 +62,8 @@
 | 采集执行 | 已完成 | 支持手动触发和后台异步执行 |
 | 调度能力 | 已完成 | 内置轻量轮询器，每天按配置时间创建 `scheduled` 任务 |
 | 报告生成 | 已完成 | 自动生成 Markdown 和 DOCX 两种格式 |
+| 内容中心 | 已完成 | 已落地 `RawItem -> ContentItem` 内容流水线，并提供 `/content-center` 与 `/api/content` |
+| 订阅中心 | 已完成 | 已落地 `Subscription -> DeliveryRecord` 分发链路，并提供 `/subscriptions` 与 `/api/subscriptions` |
 | 数据库 | 已完成 | 默认 SQLite，本地免安装；可切换 MySQL |
 | 启动器 | 已完成 | 已提供 `launcher.py`、PyInstaller spec、发布组装脚本 |
 | 启动脚本 | 已完成 | 已提供 `bootstrap.ps1`、`run.ps1`、`build_package.ps1`、`prepare_release.ps1` |
@@ -58,6 +94,7 @@
 | `app/api/` | 页面与 API 路由 |
 | `app/models/` | 数据模型 |
 | `app/services/` | 采集、任务、报告、调度服务 |
+| `migrations/versions/` | Alembic 迁移脚本，当前已覆盖内容中心与订阅中心模型 |
 | `app/collectors/` | HTTP/Playwright 采集器与解析器 |
 | `app/workers/` | 任务执行器 |
 | `scripts/bootstrap.ps1` | 初始化虚拟环境、依赖和目录 |
@@ -67,6 +104,9 @@
 | `scripts/build_offline_release.ps1` | 一键生成完整离线发布包和 zip |
 | `scripts/prepare_upgrade_release.ps1` | 组装仅包含程序文件的覆盖升级包目录 |
 | `scripts/build_upgrade_release.ps1` | 打包生成固定目录覆盖升级用的 zip |
+| `scripts/desktop_manifest_consumer.py` | 桌面壳 manifest 最小消费示例 |
+| `scripts/status.ps1` | 统一探测本地实例状态，支持 `-PrintJson` |
+| `scripts/status_system.bat` | 调用 `status.ps1` 的 bat 包装 |
 | `hot_collector.spec` | PyInstaller 打包配置 |
 | `README-运营版.txt` | 面向运营同学的简版说明 |
 | `.gitignore` | 本地环境、运行数据和打包产物忽略规则 |
@@ -75,6 +115,28 @@
 | `tests/` | 单元与集成测试 |
 | `plan.md` | 下一阶段开发计划 |
 | `spec.md` | 产品规格与架构说明 |
+
+## 内容中心与订阅中心
+
+| 能力 | 入口 | 说明 |
+| --- | --- | --- |
+| 内容中心页面 | `/content-center` | 查看 `ContentItem` 列表，作为共享内容视图的最小入口 |
+| 订阅中心页面 | `/subscriptions` | 查看当前订阅规则，作为分发配置入口 |
+| 内容 API | `/api/content` | 返回内容中心中的归一化内容列表 |
+| 订阅 API | `/api/subscriptions` | 支持订阅规则创建与查询 |
+| 桌面壳适配接口 | `/system/desktop-manifest` | 为后续 Electron / Tauri 壳层提供稳定导航与本地运行时入口清单 |
+| 内容流水线 | `RawItem -> ContentItem` | `ReportService` 生成报告前会先写入原始内容并归一化去重 |
+| 分发流水线 | `Subscription -> DeliveryRecord` | `ContentDispatchService` 负责匹配订阅、投递并记录去重结果 |
+
+## 数据模型与迁移链
+
+| 类别 | 当前对象 | 说明 |
+| --- | --- | --- |
+| 原始层 | `RawItem` | 保留任务原始抓取载荷，绑定 `source_id` 和 `job_id` |
+| 共享内容层 | `ContentItem` | 保存去重后的标准内容，供页面/API/订阅共用 |
+| 订阅层 | `Subscription` | 保存业务线、关键词、渠道等匹配规则 |
+| 投递层 | `DeliveryRecord` | 记录订阅与内容的投递结果，避免重复发送 |
+| 迁移脚本 | `0001_baseline`、`0002_retry_policy`、`0004_content_center_models`、`0005_subscriptions_and_delivery_records` | 当前仓库的主迁移链，已覆盖本轮新增模型 |
 
 ## 仓库提交与本地数据
 
@@ -98,6 +160,7 @@
 | --- | --- |
 | `docs/architecture.md` | 系统分层、核心流程、运行数据和发布架构 |
 | `docs/development.md` | 本地开发、配置、测试、采集策略扩展规范 |
+| `docs/desktop-shell-integration.md` | 桌面壳如何消费 `desktop-manifest`、schema 与本地控制面 |
 | `docs/release.md` | 完整离线包、覆盖升级包、发布前检查和回滚建议 |
 | `docs/security.md` | 敏感数据、Git 忽略边界、日志脱敏和发布包边界 |
 | `docs/roadmap.md` | 技术沉淀阶段路线图 |
@@ -284,6 +347,7 @@ python .\scripts\dingtalk_print_open_conversation_id.py --client-id "你的Clien
 | `release\HotCollector\HotCollectorLauncher.exe` | 启动器主程序 |
 | `release\HotCollector\启动系统.bat` | 给运营双击启动 |
 | `release\HotCollector\停止系统.bat` | 给运营关闭系统 |
+| `release\HotCollector\查看状态.bat` | 输出当前本地实例状态 JSON |
 | `release\HotCollector\data\` | SQLite 数据和本地配置 |
 | `release\HotCollector\logs\` | 启动日志 |
 | `release\HotCollector\outputs\reports\` | 报告输出 |
@@ -317,6 +381,7 @@ python .\scripts\dingtalk_print_open_conversation_id.py --client-id "你的Clien
 | 3 | 稍等几秒，浏览器会自动打开 `http://127.0.0.1:38080/` |
 | 4 | 在页面里维护采集源、执行任务、下载报告 |
 | 5 | 关闭时双击 `停止系统.bat` |
+| 6 | 如需确认实例状态，可在命令行执行 `查看状态.bat` |
 
 ## 使用流程
 
@@ -327,8 +392,10 @@ python .\scripts\dingtalk_print_open_conversation_id.py --client-id "你的Clien
 | 3 | 在首页 `/` 点击“立即采集”创建手动任务 |
 | 4 | 跳转到任务详情页，查看成功数、失败数和日志 |
 | 5 | 任务完成后进入 `/reports` 或任务详情页下载 Markdown / DOCX 报告 |
-| 6 | 如需每天自动执行，在 `/scheduler` 中启用并配置执行时间 |
-| 7 | 如需群通知，配置 `ENABLE_DINGTALK_NOTIFIER=true` 与钉钉 Webhook 相关环境变量，任务完成后会自动发送摘要消息 |
+| 6 | 如需查看归一化后的共享内容，进入 `/content-center` 或调用 `/api/content` |
+| 7 | 如需配置内容订阅，进入 `/subscriptions` 或调用 `/api/subscriptions` 创建规则 |
+| 8 | 如需每天自动执行，在 `/scheduler` 中启用并配置执行时间 |
+| 9 | 如需群通知，配置 `ENABLE_DINGTALK_NOTIFIER=true` 与钉钉 Webhook 相关环境变量，任务完成后会自动发送摘要消息 |
 
 如需先验证钉钉机器人是否可用，可单独发送一条测试消息：
 
@@ -376,6 +443,12 @@ python -m pytest -q
 python -m pytest tests\integration\test_scripts.py -q
 ```
 
+内容中心 / 迁移 / 冒烟专项：
+
+```powershell
+python -m pytest tests\unit\test_alembic_migrations.py tests\integration\test_content_api.py tests\integration\test_subscription_api.py tests\e2e\test_full_smoke.py -v
+```
+
 ## 已知边界
 
 | 项目 | 说明 |
@@ -390,12 +463,12 @@ python -m pytest tests\integration\test_scripts.py -q
 
 | 优先级 | 建议 |
 | --- | --- |
-| P1 | 增加采集源编辑页、删除确认和校验试抓 |
-| P1 | 补充真实站点规则示例和导入脚本 |
-| P1 | 增加启动器单实例更强校验和停止脚本回收优化 |
-| P2 | 为 Playwright 登录态增加受控目录存储和失效提示 |
-| P2 | 增加失败任务重试与报告重生成功能 |
-| P3 | 增加 AI 摘要、热点排序和消息推送 |
+| P1 | 实现真正的 Electron / Tauri 桌面壳，消费 `desktop-manifest`、schema 与本地控制面 |
+| P1 | 增加独立账号态状态页，把登录态、失效提示和巡检结果集中展示 |
+| P1 | 补充真实站点规则示例、导入脚本和更贴近运营场景的初始化样例 |
+| P2 | 增加托盘、系统通知和安装器，提升固定电脑场景的可运维性 |
+| P2 | 在单用户内核稳定前提下，评估多账号体系和更强单实例托管 |
+| P3 | 增加 AI 摘要、热点排序和更复杂的消息编排 |
 
 ## 报告快捷操作
 

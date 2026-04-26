@@ -13,6 +13,7 @@ $ReadmeSource = Join-Path $ProjectRoot 'README-运营版.txt'
 $LauncherExe = Join-Path $ReleaseDir 'HotCollectorLauncher.exe'
 $StartBat = Join-Path $ReleaseDir '启动系统.bat'
 $StopBat = Join-Path $ReleaseDir '停止系统.bat'
+$StatusBat = Join-Path $ReleaseDir '查看状态.bat'
 $UpgradeReadme = Join-Path $ReleaseDir '升级说明.txt'
 
 function Invoke-Message {
@@ -90,6 +91,7 @@ $stopContent = @'
 @echo off
 powershell -ExecutionPolicy Bypass -Command "$pidFile = Join-Path '%~dp0data' 'launcher.pid'; if (Test-Path $pidFile) { $targetPid = Get-Content $pidFile | Select-Object -First 1; if ($targetPid) { Stop-Process -Id $targetPid -Force -ErrorAction SilentlyContinue }; Remove-Item -Path $pidFile -Force -ErrorAction SilentlyContinue }"
 '@
+$statusContent = "@echo off`r`ncd /d %~dp0`r`nHotCollectorLauncher.exe --probe --print-json %*`r`n"
 $upgradeReadmeContent = @"
 固定目录覆盖升级说明
 ====================
@@ -104,7 +106,9 @@ $upgradeReadmeContent = @"
 
 Invoke-Message "写入启动脚本: $StartBat"
 Invoke-Message "写入停止脚本: $StopBat"
+Invoke-Message "写入状态脚本: $StatusBat"
 Invoke-Message "写入升级说明: $UpgradeReadme"
 New-FileContent -Path $StartBat -Content $startContent
 New-FileContent -Path $StopBat -Content $stopContent
+New-FileContent -Path $StatusBat -Content $statusContent
 New-FileContent -Path $UpgradeReadme -Content $upgradeReadmeContent

@@ -4,10 +4,13 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.api.routes_content import router as content_router
+from app.api.routes_deliveries import router as deliveries_router
 from app.api.routes_jobs import router as jobs_router
 from app.api.routes_pages import configure_job_dispatcher, router as pages_router
 from app.api.routes_reports import router as reports_router
 from app.api.routes_sources import configure_session_factory, router as sources_router
+from app.api.routes_subscriptions import router as subscriptions_router
 from app.api.routes_system import (
     configure_session_factory as configure_system_session_factory,
     router as system_router,
@@ -68,9 +71,12 @@ def create_app(start_background_workers: bool = True) -> FastAPI:
 
     app = FastAPI(title=settings.app_name, debug=settings.debug, lifespan=lifespan)
     app.state.scheduler_loop = scheduler_loop
+    app.include_router(content_router)
+    app.include_router(deliveries_router)
     app.include_router(sources_router)
     app.include_router(jobs_router)
     app.include_router(reports_router)
+    app.include_router(subscriptions_router)
     app.include_router(pages_router)
     app.include_router(system_router)
 

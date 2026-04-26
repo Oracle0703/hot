@@ -37,7 +37,7 @@ channel=offline|upgrade|dev
 
 ## 90.4 升级流程
 
-1. 双击 `停止系统.bat`（即 `stop_system.bat`）。
+1. 可先双击 `查看状态.bat` 确认当前实例状态，再双击 `停止系统.bat`（即 `stop_system.bat`）。
 2. 双击 `备份数据库.bat` 或运行 `scripts/backup_database.ps1`。
 3. 用升级包覆盖安装目录（不删除 `data/`、`logs/`、`outputs/`、`playwright-browsers/`）。
 4. 双击 `启动系统.bat`，启动时自动执行 `alembic upgrade head`。

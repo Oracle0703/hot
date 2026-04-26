@@ -10,7 +10,7 @@ from urllib.parse import urljoin, urlsplit, urlunsplit
 from bs4 import BeautifulSoup
 
 from app.config import get_settings
-from app.runtime_paths import get_runtime_paths
+from app.services.auth_state_service import AuthStateService
 from app.services.bilibili_video_detail_service import fetch_bilibili_video_detail_by_url
 from app.services.network_access_policy import launch_configured_chromium
 from app.services.strategies import run_awaitable_sync
@@ -48,8 +48,9 @@ _DEFAULT_RETRY_DELAY_SECONDS = 5.0
 
 
 class BilibiliProfileVideosRecentStrategy:
-    def __init__(self, runner=None, sleeper=None, detail_fetcher=None) -> None:
-        self.runner = runner or _PlaywrightBilibiliProfileRunner()
+    def __init__(self, runner=None, sleeper=None, detail_fetcher=None, auth_state_service: AuthStateService | None = None) -> None:
+        self.auth_state_service = auth_state_service or AuthStateService()
+        self.runner = runner or _PlaywrightBilibiliProfileRunner(auth_state_service=self.auth_state_service)
         self.sleeper = sleeper or time.sleep
         self.detail_fetcher = detail_fetcher or fetch_bilibili_video_detail_by_url
 
@@ -103,6 +104,9 @@ class BilibiliProfileVideosRecentStrategy:
 
 
 class _PlaywrightBilibiliProfileRunner:
+    def __init__(self, auth_state_service: AuthStateService | None = None) -> None:
+        self.auth_state_service = auth_state_service or AuthStateService()
+
     def fetch_items(self, source) -> list[dict[str, object]]:
         return run_awaitable_sync(self._fetch_items(source))
 
@@ -124,7 +128,7 @@ class _PlaywrightBilibiliProfileRunner:
         )
         async with async_playwright() as playwright:
             browser = await launch_configured_chromium(playwright.chromium, target_url)
-            context = await browser.new_context(**_build_context_kwargs())
+            context = await browser.new_context(**_build_context_kwargs(self.auth_state_service))
             await context.add_cookies(parsed_cookies)
             logger.info(
                 "bilibili profile cookies loaded: target_url=%s cookie_names=%s",
@@ -288,9 +292,9 @@ def _extract_items_from_api_payload_or_none(
         return None
 
 
-def _build_context_kwargs() -> dict[str, object]:
+def _build_context_kwargs(auth_state_service: AuthStateService | None = None) -> dict[str, object]:
     kwargs: dict[str, object] = {"ignore_https_errors": True}
-    storage_state_file = get_runtime_paths().bilibili_storage_state_file
+    storage_state_file = (auth_state_service or AuthStateService()).build_paths("bilibili").storage_state_file
     if storage_state_file.exists():
         kwargs["storage_state"] = str(storage_state_file)
     return kwargs

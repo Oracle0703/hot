@@ -25,8 +25,19 @@ def test_upgrade_head_creates_baseline_on_empty_db(tmp_path) -> None:
     tables = set(insp.get_table_names())
     # alembic 与若干核心业务表
     assert "alembic_version" in tables
-    for required in ("sources", "collection_jobs", "collected_items", "job_logs"):
+    for required in (
+        "sources",
+        "collection_jobs",
+        "collected_items",
+        "job_logs",
+        "raw_items",
+        "content_items",
+        "subscriptions",
+        "delivery_records",
+    ):
         assert required in tables, required
+    delivery_columns = {column["name"] for column in insp.get_columns("delivery_records")}
+    assert "error_message" in delivery_columns
 
 
 def test_upgrade_head_preserves_legacy_data(tmp_path) -> None:

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.runtime_paths import get_runtime_paths
+from app.services.auth_state_service import AuthStateService
 from app.services.app_env_service import AppEnvService, BilibiliEnvSettings
 from app.services.network_access_policy import build_playwright_launch_kwargs
 
@@ -33,12 +34,15 @@ class BilibiliBrowserAuthService:
         self,
         *,
         app_env_service: AppEnvService | None = None,
+        auth_state_service: AuthStateService | None = None,
         start_url: str = "https://www.bilibili.com/",
         login_timeout_ms: int = 180000,
         poll_interval_ms: int = 1000,
         navigation_timeout_ms: int = 45000,
     ) -> None:
-        self.app_env_service = app_env_service or AppEnvService()
+        self.auth_state_service = auth_state_service or AuthStateService()
+        runtime_paths = get_runtime_paths(self.auth_state_service.runtime_root)
+        self.app_env_service = app_env_service or AppEnvService(env_file=runtime_paths.env_file)
         self.start_url = start_url
         self.login_timeout_ms = login_timeout_ms
         self.poll_interval_ms = poll_interval_ms
@@ -53,28 +57,29 @@ class BilibiliBrowserAuthService:
         except ModuleNotFoundError as exc:  # pragma: no cover
             raise RuntimeError("playwright is not installed") from exc
 
-        runtime_paths = get_runtime_paths()
+        runtime_paths = get_runtime_paths(self.auth_state_service.runtime_root)
         runtime_paths.ensure_directories()
+        auth_paths = self.auth_state_service.build_paths("bilibili")
         launch_kwargs = build_playwright_launch_kwargs(self.start_url, headless=False)
 
         async with async_playwright() as playwright:
             context = await playwright.chromium.launch_persistent_context(
-                str(runtime_paths.bilibili_user_data_dir),
+                str(auth_paths.user_data_dir),
                 **launch_kwargs,
             )
             page = context.pages[0] if getattr(context, "pages", None) else await context.new_page()
             try:
                 await page.goto(self.start_url, wait_until="domcontentloaded", timeout=self.navigation_timeout_ms)
                 cookie_value = await self._wait_for_cookie(context)
-                await context.storage_state(path=str(runtime_paths.bilibili_storage_state_file))
+                await context.storage_state(path=str(auth_paths.storage_state_file))
             finally:
                 await context.close()
 
         settings = self.app_env_service.update_bilibili_settings(cookie=cookie_value)
         return BilibiliBrowserAuthResult(
             cookie=settings.cookie,
-            storage_state_file=runtime_paths.bilibili_storage_state_file,
-            user_data_dir=runtime_paths.bilibili_user_data_dir,
+            storage_state_file=auth_paths.storage_state_file,
+            user_data_dir=auth_paths.user_data_dir,
             settings=settings,
         )
 
@@ -91,7 +96,7 @@ class BilibiliBrowserAuthService:
 
 
 def get_bilibili_storage_state_path() -> Path:
-    return get_runtime_paths().bilibili_storage_state_file
+    return AuthStateService().build_paths("bilibili").storage_state_file
 
 
 def _build_cookie_string(cookies: list[dict[str, object]]) -> str:

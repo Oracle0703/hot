@@ -19,6 +19,7 @@ from app.models.job import CollectionJob
 from app.models.job_log import JobLog
 from app.models.report import Report
 from app.models.source import Source
+from app.services.content_pipeline_service import ContentPipelineService
 from app.services.network_access_policy import build_httpx_request_kwargs
 from app.services.published_at_display import format_published_at
 
@@ -27,6 +28,7 @@ class ReportService:
     def __init__(self, session: Session, reports_root: Path | None = None) -> None:
         self.session = session
         self.reports_root = reports_root or get_reports_root()
+        self.last_content_item_ids: list[UUID] = []
 
     def generate_for_job(self, job: CollectionJob, source_runs: list[dict[str, object]]) -> Report:
         report_dir = self.reports_root / "global"
@@ -40,8 +42,10 @@ class ReportService:
         activation_started = False
 
         try:
+            pipeline_result = ContentPipelineService(self.session).ingest_run(job.id, source_runs)
             self._upsert_collected_items(job, source_runs)
             self.session.flush()
+            self.last_content_item_ids = [item.id for item in pipeline_result.content_items if getattr(item, "id", None) is not None]
             logs, items, sources = self._load_report_context(job)
             media_assets = self._sync_item_media_assets(report_dir, items)
             self._prune_unused_media_assets(report_dir, media_assets)
@@ -62,6 +66,7 @@ class ReportService:
             self.session.refresh(report)
             return report
         except Exception:
+            self.last_content_item_ids = []
             self.session.rollback()
             if activation_started:
                 self._restore_report_files(markdown_path, docx_path, backup_paths, existing_report_files)

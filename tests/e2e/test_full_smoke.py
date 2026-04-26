@@ -11,7 +11,11 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import pytest
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import sessionmaker
 
+from app.models.delivery_record import DeliveryRecord
+from app.services.dingtalk_webhook_service import DingTalkWebhookService
 from tests.conftest import create_test_client, make_sqlite_url
 
 
@@ -137,6 +141,63 @@ class TestFullSmoke:
             assert "新游版号过审重磅" in md.text
         finally:
             client.close()
+
+    def test_full_pipeline_promotes_content_and_auto_dispatches_subscription(self, tmp_path, monkeypatch) -> None:
+        """TC-E2E-006: 任务产出内容中心记录，并按订阅规则自动生成投递记录。"""
+        monkeypatch.setenv("REPORTS_ROOT", str(tmp_path / "reports"))
+        monkeypatch.setenv("ENABLE_DINGTALK_NOTIFIER", "true")
+        monkeypatch.setenv("DINGTALK_WEBHOOK", "https://oapi.dingtalk.com/robot/send?access_token=e2e-token")
+        html_path = tmp_path / "topics.html"
+        html_path.write_text(HTML_FIXTURE, encoding="utf-8")
+        db_url = make_sqlite_url(tmp_path, "content-dispatch.db")
+        requests: list[dict[str, object]] = []
+
+        def fake_send(self, webhook: str, payload: dict[str, object], timeout_seconds: float, secret: str | None) -> None:
+            requests.append(
+                {
+                    "webhook": webhook,
+                    "payload": payload,
+                    "timeout_seconds": timeout_seconds,
+                    "secret": secret,
+                }
+            )
+
+        monkeypatch.setattr(DingTalkWebhookService, "_send_webhook", fake_send)
+        monkeypatch.setattr(DingTalkWebhookService, "notify_job_summary", lambda self, job: False)
+        client = create_test_client(db_url)
+        try:
+            _add_local_html_source(client, html_path, name="HR情报源")
+            subscription_response = client.post(
+                "/api/subscriptions",
+                json={
+                    "code": "hr-daily",
+                    "channel": "dingtalk",
+                    "business_lines": ["HR情报源"],
+                    "keywords": ["新游"],
+                },
+            )
+            assert subscription_response.status_code == 201, subscription_response.text
+
+            _, body = _trigger_job_and_wait(client)
+            assert body["status"] == "success", body
+
+            content_response = client.get("/api/content")
+            assert content_response.status_code == 200
+            content_payload = content_response.json()
+            assert len(content_payload) == 2
+            assert {item["title"] for item in content_payload} == {"新游版号过审重磅", "新作开放预约"}
+        finally:
+            client.close()
+
+        engine = create_engine(db_url, future=True, connect_args={"check_same_thread": False})
+        session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
+        with session_factory() as session:
+            records = list(session.scalars(select(DeliveryRecord)).all())
+
+        assert len(requests) == 1
+        assert str(requests[0]["webhook"]).startswith("https://oapi.dingtalk.com/robot/send?access_token=e2e-token")
+        assert len(records) == 1
+        assert records[0].status == "sent"
 
     def test_upgrade_preserves_data(self, tmp_path, monkeypatch) -> None:
         """TC-E2E-003: 模拟升级——同一 DB 重建 app,源/任务/报告记录全部保留。"""

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import atexit
+import json
 import logging
 import logging.handlers
 import os
@@ -111,6 +112,69 @@ def build_browser_url(bind_host: str, port: int) -> str:
     return f"http://{browser_host}:{port}/"
 
 
+def build_local_service_urls(bind_host: str, port: int) -> dict[str, str]:
+    entry_url = build_browser_url(bind_host, port)
+    base_url = entry_url.rstrip("/")
+    return {
+        "entry_url": entry_url,
+        "desktop_manifest_url": f"{base_url}/system/desktop-manifest",
+        "health_url": f"{base_url}/system/health/extended",
+        "docs_url": f"{base_url}/docs",
+    }
+
+
+def build_dry_run_summary(
+    paths: RuntimePaths,
+    runtime_env: dict[str, str],
+    service_urls: dict[str, str],
+) -> dict[str, str]:
+    return {
+        "runtime_root": str(paths.runtime_root),
+        "entry_url": service_urls["entry_url"],
+        "desktop_manifest_url": service_urls["desktop_manifest_url"],
+        "health_url": service_urls["health_url"],
+        "docs_url": service_urls["docs_url"],
+        "database": runtime_env["DATABASE_URL"],
+        "reports": runtime_env["REPORTS_ROOT"],
+        "playwright": runtime_env["PLAYWRIGHT_BROWSERS_PATH"],
+    }
+
+
+def read_launcher_pid(paths: RuntimePaths) -> int | None:
+    if not paths.pid_file.exists():
+        return None
+    try:
+        return int(paths.pid_file.read_text(encoding="utf-8").strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def build_probe_summary(
+    paths: RuntimePaths,
+    service_urls: dict[str, str],
+    *,
+    target_host: str,
+    port: int,
+    running: bool,
+    pid: int | None,
+) -> dict[str, object]:
+    pid_file_exists = pid is not None or paths.pid_file.exists()
+    return {
+        "kind": "launcher-probe",
+        "runtime_root": str(paths.runtime_root),
+        "target_host": target_host,
+        "port": port,
+        "running": running,
+        "pid": pid,
+        "pid_file_exists": pid_file_exists,
+        "stale_pid_file": bool(pid_file_exists and not running),
+        "entry_url": service_urls["entry_url"],
+        "desktop_manifest_url": service_urls["desktop_manifest_url"],
+        "health_url": service_urls["health_url"],
+        "docs_url": service_urls["docs_url"],
+    }
+
+
 def is_port_open(host: str, port: int, timeout: float = 0.25) -> bool:
     try:
         with socket.create_connection((host, port), timeout=timeout):
@@ -171,23 +235,52 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--runtime-root", default=None)
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--probe", action="store_true")
+    parser.add_argument("--print-json", action="store_true")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     paths = get_runtime_paths(args.runtime_root)
+    service_urls = build_local_service_urls(args.host, args.port)
+    target_host = "127.0.0.1" if args.host == "0.0.0.0" else args.host
+
+    if args.probe:
+        pid = read_launcher_pid(paths)
+        summary = build_probe_summary(
+            paths,
+            service_urls,
+            target_host=target_host,
+            port=args.port,
+            running=is_port_open(target_host, args.port),
+            pid=pid,
+        )
+        if args.print_json:
+            print(json.dumps(summary, ensure_ascii=False))
+        else:
+            for key, value in summary.items():
+                print(f"{key}={value}")
+        return 0
+
     paths.ensure_directories()
     runtime_env = build_runtime_environment(paths, load_env_file(paths.env_file), dict(os.environ))
     os.environ.update(runtime_env)
 
     browser_url = build_browser_url(args.host, args.port)
     if args.dry_run:
-        print(f"runtime_root={paths.runtime_root}")
-        print(f"url={browser_url}")
-        print(f"database={runtime_env['DATABASE_URL']}")
-        print(f"reports={runtime_env['REPORTS_ROOT']}")
-        print(f"playwright={runtime_env['PLAYWRIGHT_BROWSERS_PATH']}")
+        summary = build_dry_run_summary(paths, runtime_env, service_urls)
+        if args.print_json:
+            print(json.dumps(summary, ensure_ascii=False))
+        else:
+            print(f"runtime_root={summary['runtime_root']}")
+            print(f"url={summary['entry_url']}")
+            print(f"desktop_manifest={summary['desktop_manifest_url']}")
+            print(f"health={summary['health_url']}")
+            print(f"docs={summary['docs_url']}")
+            print(f"database={summary['database']}")
+            print(f"reports={summary['reports']}")
+            print(f"playwright={summary['playwright']}")
         return 0
 
     logger = setup_logging(paths)
@@ -196,7 +289,6 @@ def main(argv: list[str] | None = None) -> int:
     logger.info("database: %s", runtime_env["DATABASE_URL"])
     logger.info("reports root: %s", runtime_env["REPORTS_ROOT"])
 
-    target_host = "127.0.0.1" if args.host == "0.0.0.0" else args.host
     if is_port_open(target_host, args.port):
         logger.info("server already running, opening browser only")
         if not args.no_browser:

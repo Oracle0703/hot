@@ -18,13 +18,27 @@ class ReasonCode:
     TIMEOUT = "TIMEOUT"
     PARSE = "PARSE"
     AUTH = "AUTH"
+    AUTH_EXPIRED = "AUTH_EXPIRED"
+    AUTH_MISSING = "AUTH_MISSING"
+    RISK_CONTROL = "RISK_CONTROL"
+    PERMISSION_DENIED = "PERMISSION_DENIED"
     CANCELLED = "CANCELLED"
     UNKNOWN = "UNKNOWN"
 
 
 VALID_REASON_CODES = frozenset(
-    {ReasonCode.NETWORK, ReasonCode.TIMEOUT, ReasonCode.PARSE,
-     ReasonCode.AUTH, ReasonCode.CANCELLED, ReasonCode.UNKNOWN}
+    {
+        ReasonCode.NETWORK,
+        ReasonCode.TIMEOUT,
+        ReasonCode.PARSE,
+        ReasonCode.AUTH,
+        ReasonCode.AUTH_EXPIRED,
+        ReasonCode.AUTH_MISSING,
+        ReasonCode.RISK_CONTROL,
+        ReasonCode.PERMISSION_DENIED,
+        ReasonCode.CANCELLED,
+        ReasonCode.UNKNOWN,
+    }
 )
 
 

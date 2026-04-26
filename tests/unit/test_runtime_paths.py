@@ -3,12 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 
 from app.runtime_paths import RuntimePaths, get_runtime_paths
+from app.services.auth_state_service import AuthStateService
 
 
 def test_get_runtime_paths_prefers_hot_runtime_root_env(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("HOT_RUNTIME_ROOT", str(tmp_path))
 
     paths = get_runtime_paths()
+    auth_paths = AuthStateService(runtime_root=tmp_path).build_paths("bilibili")
 
     assert paths.runtime_root == tmp_path.resolve()
     assert paths.data_dir == tmp_path / "data"
@@ -16,8 +18,8 @@ def test_get_runtime_paths_prefers_hot_runtime_root_env(monkeypatch, tmp_path) -
     assert paths.outputs_dir == tmp_path / "outputs"
     assert paths.reports_dir == tmp_path / "outputs" / "reports"
     assert paths.playwright_browsers_dir == tmp_path / "playwright-browsers"
-    assert paths.bilibili_user_data_dir == tmp_path / "data" / "bilibili-user-data"
-    assert paths.bilibili_storage_state_file == tmp_path / "data" / "bilibili-storage-state.json"
+    assert paths.bilibili_user_data_dir == auth_paths.user_data_dir
+    assert paths.bilibili_storage_state_file == auth_paths.storage_state_file
     assert paths.env_file == tmp_path / "data" / "app.env"
     assert paths.pid_file == tmp_path / "data" / "launcher.pid"
     assert paths.launcher_log_file == tmp_path / "logs" / "launcher.log"

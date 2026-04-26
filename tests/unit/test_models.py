@@ -1,9 +1,13 @@
 ﻿from sqlalchemy.orm import configure_mappers
 
+from app.models.content_item import ContentItem
+from app.models.delivery_record import DeliveryRecord
 from app.models.item import CollectedItem
 from app.models.job import CollectionJob
+from app.models.raw_item import RawItem
 from app.models.report import Report
 from app.models.schedule_plan import SchedulePlan
+from app.models.subscription import Subscription
 from app.models.source import Source
 
 
@@ -100,4 +104,40 @@ def test_collected_item_job_relationship_maps_to_job_id_only() -> None:
     relationship_property = CollectedItem.__mapper__.relationships["job"]
 
     assert CollectedItem.__table__.columns["job_id"] in relationship_property._calculated_foreign_keys
+
+
+def test_raw_item_belongs_to_source_and_job() -> None:
+    columns = RawItem.__table__.columns
+
+    assert columns["source_id"].nullable is False
+    assert columns["job_id"].nullable is False
+    assert "payload" in columns
+
+
+def test_content_item_uses_unique_dedupe_key() -> None:
+    columns = ContentItem.__table__.columns
+    unique_constraints = list(ContentItem.__table__.constraints)
+
+    assert columns["dedupe_key"].nullable is False
+    assert columns["canonical_url"].nullable is False
+    assert any(
+        constraint.__class__.__name__ == "UniqueConstraint"
+        and [column.name for column in constraint.columns] == ["dedupe_key"]
+        for constraint in unique_constraints
+    )
+
+
+def test_subscription_and_delivery_record_keep_core_columns() -> None:
+    subscription_columns = Subscription.__table__.columns
+    delivery_columns = DeliveryRecord.__table__.columns
+
+    assert subscription_columns["code"].nullable is False
+    assert subscription_columns["channel"].nullable is False
+    assert "business_lines" in subscription_columns
+    assert "keywords" in subscription_columns
+    assert delivery_columns["subscription_id"].nullable is False
+    assert delivery_columns["content_item_id"].nullable is False
+    assert delivery_columns["status"].nullable is False
+    assert "error_message" in delivery_columns
+    assert delivery_columns["error_message"].nullable is True
 
