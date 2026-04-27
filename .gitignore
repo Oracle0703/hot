@@ -34,6 +34,7 @@ dist/
 release/
 .pyinstaller/
 *.zip
+desktop-shell/electron/node_modules/
 
 # Cached installers and binary prerequisites
 packaging/prerequisites/*.exe

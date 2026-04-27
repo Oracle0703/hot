@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
+import pytest
 from sqlalchemy import create_engine, inspect, text
 
 from app.db import create_session_factory, ensure_schema_compatibility, get_engine
 from app.models.base import Base
+from app.models.site_account import SiteAccount
 from app.models.source import Source
 from app.services.source_service import SourceService
 
@@ -131,3 +134,41 @@ def test_ensure_schema_compatibility_adds_retry_policy_column_for_legacy_sources
 
     columns = {column["name"] for column in inspect(engine).get_columns("sources")}
     assert "retry_policy" in columns
+    assert "account_id" in columns
+
+
+def test_source_service_create_source_rejects_disabled_account_id(tmp_path) -> None:
+    session_factory = setup_database(tmp_path, "source-service-disabled-account.db")
+    with session_factory() as session:
+        account = SiteAccount(
+            platform="bilibili",
+            account_key="creator-a",
+            display_name="账号A",
+            enabled=False,
+            is_default=False,
+        )
+        session.add(account)
+        session.commit()
+        service = SourceService(session)
+
+        payload = SimpleNamespace(
+            model_dump=lambda **kwargs: {
+                "name": "B站UP",
+                "site_name": "Bilibili",
+                "entry_url": "https://space.bilibili.com/20411266",
+                "fetch_mode": "playwright",
+                "parser_type": None,
+                "include_keywords": [],
+                "exclude_keywords": [],
+                "max_items": 30,
+                "enabled": True,
+                "source_group": "domestic",
+                "schedule_group": None,
+                "collection_strategy": "bilibili_profile_videos_recent",
+                "search_keyword": None,
+                "account_id": account.id,
+            }
+        )
+
+        with pytest.raises(ValueError, match="disabled|禁用"):
+            service.create_source(payload)

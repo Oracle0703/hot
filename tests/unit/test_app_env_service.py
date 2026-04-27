@@ -123,6 +123,21 @@ def test_app_env_service_reads_bilibili_cookie_from_env_file(tmp_path, monkeypat
     assert settings.cookie == 'SESSDATA=test-sess; bili_jct=test-jct; DedeUserID=123'
 
 
+def test_app_env_service_reads_account_scoped_bilibili_cookie_from_env_file(tmp_path, monkeypatch) -> None:
+    env_file = tmp_path / 'data' / 'app.env'
+    env_file.parent.mkdir(parents=True, exist_ok=True)
+    env_file.write_text(
+        'BILIBILI_COOKIE__CREATOR_A=SESSDATA=creator-sess; bili_jct=creator-jct; DedeUserID=456\n',
+        encoding='utf-8-sig',
+    )
+    monkeypatch.delenv('BILIBILI_COOKIE__CREATOR_A', raising=False)
+
+    settings = AppEnvService(env_file=env_file).get_bilibili_settings(account_key='creator-a')
+
+    assert settings.account_key == 'creator-a'
+    assert settings.cookie == 'SESSDATA=creator-sess; bili_jct=creator-jct; DedeUserID=456'
+
+
 def test_app_env_service_normalizes_prefixed_bilibili_cookie(tmp_path, monkeypatch) -> None:
     env_file = tmp_path / 'data' / 'app.env'
     monkeypatch.delenv('BILIBILI_COOKIE', raising=False)
@@ -132,6 +147,20 @@ def test_app_env_service_normalizes_prefixed_bilibili_cookie(tmp_path, monkeypat
     )
 
     assert settings.cookie == 'SESSDATA=test-sess; bili_jct=test-jct; DedeUserID=123'
+
+
+def test_app_env_service_updates_account_scoped_bilibili_cookie_and_writes_env_file(tmp_path, monkeypatch) -> None:
+    env_file = tmp_path / 'data' / 'app.env'
+    monkeypatch.delenv('BILIBILI_COOKIE__CREATOR_A', raising=False)
+
+    settings = AppEnvService(env_file=env_file).update_bilibili_settings(
+        cookie='SESSDATA=creator-sess; bili_jct=creator-jct; DedeUserID=456',
+        account_key='creator-a',
+    )
+
+    assert settings.account_key == 'creator-a'
+    assert settings.cookie == 'SESSDATA=creator-sess; bili_jct=creator-jct; DedeUserID=456'
+    assert 'BILIBILI_COOKIE__CREATOR_A=SESSDATA=creator-sess; bili_jct=creator-jct; DedeUserID=456' in env_file.read_text(encoding='utf-8')
 
 
 def test_app_env_service_normalizes_quoted_multiline_bilibili_cookie(tmp_path, monkeypatch) -> None:

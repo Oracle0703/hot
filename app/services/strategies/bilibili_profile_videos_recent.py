@@ -117,7 +117,7 @@ class _PlaywrightBilibiliProfileRunner:
             raise RuntimeError("playwright is not installed") from exc
 
         target_url = _build_video_page_url(str(getattr(source, "entry_url", "") or ""))
-        cookie_value = _get_required_bilibili_cookie()
+        cookie_value = _get_required_bilibili_cookie(source)
         parsed_cookies = _parse_bilibili_cookie_string(cookie_value)
         cookie_names = [cookie["name"] for cookie in parsed_cookies]
         api_payload: dict[str, object] | None = None
@@ -128,7 +128,7 @@ class _PlaywrightBilibiliProfileRunner:
         )
         async with async_playwright() as playwright:
             browser = await launch_configured_chromium(playwright.chromium, target_url)
-            context = await browser.new_context(**_build_context_kwargs(self.auth_state_service))
+            context = await browser.new_context(**_build_context_kwargs(source, auth_state_service=self.auth_state_service))
             await context.add_cookies(parsed_cookies)
             logger.info(
                 "bilibili profile cookies loaded: target_url=%s cookie_names=%s",
@@ -182,8 +182,10 @@ class _PlaywrightBilibiliProfileRunner:
         return items
 
 
-def _get_required_bilibili_cookie() -> str:
-    value = get_settings().bilibili_cookie.strip()
+def _get_required_bilibili_cookie(source=None) -> str:
+    value = str(getattr(source, "account_cookie", "") or "").strip()
+    if not value:
+        value = get_settings().bilibili_cookie.strip()
     if not value:
         raise RuntimeError("BILIBILI_COOKIE is required for bilibili_profile_videos_recent strategy")
     return value
@@ -292,9 +294,10 @@ def _extract_items_from_api_payload_or_none(
         return None
 
 
-def _build_context_kwargs(auth_state_service: AuthStateService | None = None) -> dict[str, object]:
+def _build_context_kwargs(source=None, auth_state_service: AuthStateService | None = None) -> dict[str, object]:
     kwargs: dict[str, object] = {"ignore_https_errors": True}
-    storage_state_file = (auth_state_service or AuthStateService()).build_paths("bilibili").storage_state_file
+    account_key = str(getattr(source, "account_key", "") or "default").strip() or "default"
+    storage_state_file = (auth_state_service or AuthStateService()).build_paths("bilibili", account_key).storage_state_file
     if storage_state_file.exists():
         kwargs["storage_state"] = str(storage_state_file)
     return kwargs

@@ -2,7 +2,7 @@
 
 from uuid import uuid4
 
-from sqlalchemy import JSON, Boolean, Integer, String, Text, Uuid
+from sqlalchemy import JSON, Boolean, ForeignKey, Integer, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -30,5 +30,7 @@ class Source(Base):
     collection_strategy: Mapped[str] = mapped_column(String(50), nullable=False, default="generic_css")
     search_keyword: Mapped[str | None] = mapped_column(String(200), nullable=True)
     retry_policy: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    account_id: Mapped[str | None] = mapped_column(Uuid, ForeignKey("site_accounts.id"), nullable=True)
 
     items = relationship("CollectedItem", back_populates="source")
+    account = relationship("SiteAccount", back_populates="sources")

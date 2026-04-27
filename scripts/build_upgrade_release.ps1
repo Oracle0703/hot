@@ -2,6 +2,7 @@
 param(
     [string]$ReleaseRoot = ('release\HotCollector-Upgrade-' + (Get-Date -Format 'yyyyMMdd-HHmmss')),
     [string]$DistRoot = 'dist\HotCollectorLauncher',
+    [string]$DesktopShellDistRoot = 'build\HotCollectorDesktopShell',
     [switch]$SkipBuild,
     [switch]$DryRun
 )
@@ -9,6 +10,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $BuildScript = Join-Path $PSScriptRoot 'build_package.ps1'
+$BuildDesktopShellScript = Join-Path $PSScriptRoot 'build_desktop_shell.ps1'
 $PrepareScript = Join-Path $PSScriptRoot 'prepare_upgrade_release.ps1'
 $ReleaseDir = Join-Path $ProjectRoot $ReleaseRoot
 $ZipPath = "$ReleaseDir.zip"
@@ -67,11 +69,15 @@ function New-ReleaseArchive {
     }
 }
 
+if ($DryRun -or (-not $SkipBuild)) {
+    Invoke-Step -FilePath 'powershell.exe' -Arguments @('-ExecutionPolicy', 'Bypass', '-File', $BuildDesktopShellScript, '-OutputRoot', $DesktopShellDistRoot) -DisplayCommand "powershell.exe -ExecutionPolicy Bypass -File scripts\build_desktop_shell.ps1 -OutputRoot $DesktopShellDistRoot"
+}
+
 if (-not $SkipBuild) {
     Invoke-Step -FilePath 'powershell.exe' -Arguments @('-ExecutionPolicy', 'Bypass', '-File', $BuildScript) -DisplayCommand 'powershell.exe -ExecutionPolicy Bypass -File scripts\build_package.ps1'
 }
 
-Invoke-Step -FilePath 'powershell.exe' -Arguments @('-ExecutionPolicy', 'Bypass', '-File', $PrepareScript, '-ReleaseRoot', $ReleaseRoot, '-DistRoot', $DistRoot) -DisplayCommand "powershell.exe -ExecutionPolicy Bypass -File scripts\prepare_upgrade_release.ps1 -ReleaseRoot $ReleaseRoot -DistRoot $DistRoot"
+Invoke-Step -FilePath 'powershell.exe' -Arguments @('-ExecutionPolicy', 'Bypass', '-File', $PrepareScript, '-ReleaseRoot', $ReleaseRoot, '-DistRoot', $DistRoot, '-DesktopShellDistRoot', $DesktopShellDistRoot) -DisplayCommand "powershell.exe -ExecutionPolicy Bypass -File scripts\prepare_upgrade_release.ps1 -ReleaseRoot $ReleaseRoot -DistRoot $DistRoot -DesktopShellDistRoot $DesktopShellDistRoot"
 
 New-ReleaseArchive -SourceDir $ReleaseDir -DestinationZip $ZipPath
 

@@ -9,6 +9,7 @@ import pytest
 from app.services.strategies.bilibili_site_search import (
     BilibiliSiteSearchStrategy,
     _extract_bilibili_items,
+    _get_optional_bilibili_cookies,
     _PlaywrightBilibiliRunner,
 )
 
@@ -203,4 +204,13 @@ def test_bilibili_runner_uses_domcontentloaded_navigation(monkeypatch: pytest.Mo
 
     assert [item["url"] for item in items] == ["https://www.bilibili.com/video/BV1"]
     assert browser.page.goto_wait_until == "domcontentloaded"
+
+
+def test_bilibili_site_search_prefers_bound_account_cookie() -> None:
+    cookies = _get_optional_bilibili_cookies(
+        SimpleNamespace(account_cookie="SESSDATA=creator-sess; bili_jct=creator-jct; DedeUserID=2")
+    )
+
+    assert {cookie["name"] for cookie in cookies} == {"SESSDATA", "bili_jct", "DedeUserID"}
+    assert any(cookie["value"] == "creator-sess" for cookie in cookies)
 

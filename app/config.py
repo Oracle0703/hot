@@ -85,13 +85,74 @@ def _get_bool_env(name: str, default: bool, file_values: dict[str, str] | None =
     return value.lower() in {"1", "true", "yes", "on"}
 
 
+def _get_settings_env_keys() -> set[str]:
+    try:
+        from app.config_schema import SettingsSchema
+
+        keys: set[str] = set()
+        for field in SettingsSchema.model_fields.values():
+            alias = getattr(field, "alias", None)
+            if isinstance(alias, str) and alias:
+                keys.add(alias)
+        return keys
+    except Exception:
+        return {
+            'APP_NAME',
+            'APP_ENV',
+            'APP_DEBUG',
+            'DATABASE_URL',
+            'REPORTS_ROOT',
+            'ENABLE_SCHEDULER',
+            'SCHEDULER_POLL_SECONDS',
+            'ENABLE_DINGTALK_NOTIFIER',
+            'DINGTALK_WEBHOOK',
+            'DINGTALK_SECRET',
+            'DINGTALK_KEYWORD',
+            'BILIBILI_COOKIE',
+            'REPORT_SHARE_DIR',
+            'ENABLE_SITE_PROXY_RULES',
+            'OUTBOUND_PROXY_URL',
+            'OUTBOUND_PROXY_BYPASS_DOMAINS',
+            'SOURCE_FETCH_INTERVAL_SECONDS',
+            'BILIBILI_SOURCE_INTERVAL_SECONDS',
+            'BILIBILI_RETRY_DELAY_SECONDS',
+            'WEEKLY_COVER_CACHE_RETENTION_DAYS',
+            'WEEKLY_GRADE_PUSH_THRESHOLD',
+        }
+
+
+def _build_settings_schema_input(file_values: dict[str, str]) -> dict[str, str]:
+    try:
+        from app.config_schema import SettingsSchema
+
+        values: dict[str, str] = {}
+        for field in SettingsSchema.model_fields.values():
+            alias = getattr(field, "alias", None)
+            if not isinstance(alias, str) or not alias:
+                continue
+            env_value = os.getenv(alias)
+            if env_value is not None:
+                values[alias] = env_value
+                continue
+            file_value = file_values.get(alias)
+            if file_value is not None:
+                values[alias] = file_value
+        return values
+    except Exception:
+        return {}
+
+
 def _hydrate_process_env(file_values: dict[str, str]) -> None:
+    settings_env_keys = _get_settings_env_keys()
     for key, value in file_values.items():
+        if key in settings_env_keys:
+            continue
         os.environ.setdefault(key, value)
 
 
 def get_settings() -> Settings:
     file_values = _load_runtime_env_values()
+    schema_input = _build_settings_schema_input(file_values)
     _hydrate_process_env(file_values)
     # 优先走 Pydantic schema 验证(REQ-CFG-001):若任何字段非法直接抛 ValidationError,
     # 调用方应在启动期 catch 并落 launcher.log。失败时回退到旧的宽松 dict 解析,
@@ -99,7 +160,7 @@ def get_settings() -> Settings:
     try:
         from app.config_schema import SettingsSchema
 
-        schema = SettingsSchema()
+        schema = SettingsSchema(**schema_input)
         return Settings(
             app_name=schema.app_name,
             environment=schema.environment,

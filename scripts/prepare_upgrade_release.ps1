@@ -2,6 +2,7 @@
 param(
     [string]$ReleaseRoot = 'release\HotCollector-Upgrade',
     [string]$DistRoot = 'dist\HotCollectorLauncher',
+    [string]$DesktopShellDistRoot = 'build\HotCollectorDesktopShell',
     [switch]$DryRun
 )
 
@@ -9,11 +10,14 @@ $ErrorActionPreference = 'Stop'
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $ReleaseDir = Join-Path $ProjectRoot $ReleaseRoot
 $DistDir = Join-Path $ProjectRoot $DistRoot
+$DesktopShellDistDir = Join-Path $ProjectRoot $DesktopShellDistRoot
 $ReadmeSource = Join-Path $ProjectRoot 'README-运营版.txt'
+$DesktopShellDir = Join-Path $ReleaseDir 'desktop-shell'
 $LauncherExe = Join-Path $ReleaseDir 'HotCollectorLauncher.exe'
 $StartBat = Join-Path $ReleaseDir '启动系统.bat'
 $StopBat = Join-Path $ReleaseDir '停止系统.bat'
 $StatusBat = Join-Path $ReleaseDir '查看状态.bat'
+$DesktopBat = Join-Path $ReleaseDir '打开桌面版.bat'
 $UpgradeReadme = Join-Path $ReleaseDir '升级说明.txt'
 
 function Invoke-Message {
@@ -66,12 +70,16 @@ function Copy-ProgramFiles {
 
 Invoke-Message "准备升级包目录: $ReleaseDir"
 Invoke-Message "复制程序文件: $DistDir -> $ReleaseDir"
+Invoke-Message "复制桌面壳文件: $DesktopShellDistDir -> $DesktopShellDir"
 Invoke-Message "目标启动器: $LauncherExe"
 Invoke-Message "说明: 此升级包仅覆盖程序文件，不包含 data/logs/outputs/playwright-browsers"
 
 if (-not $DryRun) {
     if (-not (Test-Path $DistDir)) {
         throw "未找到打包输出目录: $DistDir，请先执行 scripts/build_package.ps1"
+    }
+    if (-not (Test-Path $DesktopShellDistDir)) {
+        throw "未找到桌面壳输出目录: $DesktopShellDistDir，请先执行 scripts/build_desktop_shell.ps1"
     }
 
     if (Test-Path $ReleaseDir) {
@@ -80,6 +88,7 @@ if (-not $DryRun) {
 
     New-Item -ItemType Directory -Force $ReleaseDir | Out-Null
     Copy-ProgramFiles -SourceDir $DistDir -DestinationDir $ReleaseDir
+    Copy-ProgramFiles -SourceDir $DesktopShellDistDir -DestinationDir $DesktopShellDir
 
     if (Test-Path $ReadmeSource) {
         Copy-Item -Path $ReadmeSource -Destination (Join-Path $ReleaseDir 'README-运营版.txt') -Force
@@ -87,6 +96,7 @@ if (-not $DryRun) {
 }
 
 $startContent = "@echo off`r`ncd /d %~dp0`r`nHotCollectorLauncher.exe`r`n"
+$desktopContent = "@echo off`r`ncd /d %~dp0`r`ncall desktop-shell\launch-desktop-shell.bat`r`n"
 $stopContent = @'
 @echo off
 powershell -ExecutionPolicy Bypass -Command "$pidFile = Join-Path '%~dp0data' 'launcher.pid'; if (Test-Path $pidFile) { $targetPid = Get-Content $pidFile | Select-Object -First 1; if ($targetPid) { Stop-Process -Id $targetPid -Force -ErrorAction SilentlyContinue }; Remove-Item -Path $pidFile -Force -ErrorAction SilentlyContinue }"
@@ -107,8 +117,10 @@ $upgradeReadmeContent = @"
 Invoke-Message "写入启动脚本: $StartBat"
 Invoke-Message "写入停止脚本: $StopBat"
 Invoke-Message "写入状态脚本: $StatusBat"
+Invoke-Message "写入桌面版脚本: $DesktopBat"
 Invoke-Message "写入升级说明: $UpgradeReadme"
 New-FileContent -Path $StartBat -Content $startContent
 New-FileContent -Path $StopBat -Content $stopContent
 New-FileContent -Path $StatusBat -Content $statusContent
+New-FileContent -Path $DesktopBat -Content $desktopContent
 New-FileContent -Path $UpgradeReadme -Content $upgradeReadmeContent

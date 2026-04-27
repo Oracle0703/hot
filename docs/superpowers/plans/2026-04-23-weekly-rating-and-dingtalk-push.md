@@ -1,5 +1,7 @@
 # 周榜人工评分与批量钉钉推送 Implementation Plan
 
+状态：已完成（2026-04-26 已落地并回归通过）
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 在 `/weekly` 页面增加推荐评分、人工评分、推送状态，并支持“保存评分”和“批量推送达标项到钉钉”。
@@ -34,3 +36,61 @@
 | 3 | 补 `/weekly` 页面评分列与保存表单 |
 | 4 | 实现批量钉钉推送 service 和页面按钮 |
 | 5 | 跑周榜相关单测与集成测试 |
+
+### Task 1: 评分规则与字段接入
+
+**Files:**
+- Modify: `app/models/item.py`
+- Modify: `app/db.py`
+- Create: `app/services/weekly_rating_service.py`
+- Create: `tests/unit/test_weekly_rating_service.py`
+
+- [x] **Step 1: 增加推荐评分、人工评分、推送状态字段**
+- [x] **Step 2: 补推荐评分与等级比较测试**
+- [x] **Step 3: 实现评分归一化、推荐评分和人工评分保存**
+- [x] **Step 4: 运行周榜评分相关单测并通过**
+
+### Task 2: 周榜页评分交互
+
+**Files:**
+- Modify: `app/api/routes_reports.py`
+- Modify: `app/ui/page_theme.py`
+- Modify: `tests/integration/test_reports.py`
+
+- [x] **Step 1: 在 `/weekly` 页面增加推荐评分、人工评分、推送状态列**
+- [x] **Step 2: 接入保存评分表单与页面反馈**
+- [x] **Step 3: 增加批量设分与清空本页评分交互**
+- [x] **Step 4: 运行页面集成测试确认通过**
+
+### Task 3: 批量钉钉推送
+
+**Files:**
+- Create: `app/services/weekly_dingtalk_push_service.py`
+- Modify: `app/api/routes_reports.py`
+- Create: `tests/unit/test_weekly_dingtalk_push_service.py`
+- Modify: `tests/integration/test_reports.py`
+
+- [x] **Step 1: 实现达标筛选、未推送去重与 markdown 合并消息**
+- [x] **Step 2: 接入 `/weekly/push` 批量推送动作**
+- [x] **Step 3: 增加达标推送与空结果分支测试**
+- [x] **Step 4: 验证推送后状态回写与页面提示**
+
+### Task 4: 最终验证
+
+**Files:**
+- None
+
+- [x] **Step 1: 运行周榜相关单测与集成测试**
+- [x] **Step 2: 继续纳入更大范围回归，确认无连带回归**
+- [x] **Step 3: 记录最终验证结果与已知边界**
+
+## 最终结果
+
+| 项目 | 结果 |
+| --- | --- |
+| 页面能力 | `/weekly` 已支持推荐评分、人工评分保存、推送状态展示 |
+| 推送能力 | 已支持按 `WEEKLY_GRADE_PUSH_THRESHOLD` 批量推送达标项到钉钉 |
+| 去重策略 | 已推送内容会写回时间与批次号，不会重复进入下一批 |
+| 运营闭环 | 已补齐 `/config`、`/scheduler`、README / release 文档、返回周榜 CTA 与配置生效提示 |
+| 验证结果 | 已覆盖单测、集成测试，并纳入 2026-04-27 全量 `455 passed / 11 warnings` 回归 |
+| 已知边界 | 第一版仍依赖人工评分，不做自动发群审批流 |

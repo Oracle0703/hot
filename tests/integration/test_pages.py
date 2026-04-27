@@ -6,8 +6,9 @@ from uuid import UUID
 from sqlalchemy import select
 
 from app.api.routes_sources import SessionFactoryHolder
-from app.services.dingtalk_webhook_service import DingTalkWebhookService
 from app.runtime_paths import get_runtime_paths
+from app.services.auth_state_service import AuthStateService
+from app.services.dingtalk_webhook_service import DingTalkWebhookService
 from app.models.content_item import ContentItem
 from app.models.delivery_record import DeliveryRecord
 from app.models.job import CollectionJob
@@ -194,6 +195,7 @@ def _run_job_and_wait_for_report(client, *, max_attempts: int = 20) -> tuple[str
 
 
 def test_run_job_starts_background_execution_and_reaches_success(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("APP_DEBUG", "true")
     monkeypatch.setenv("REPORTS_ROOT", str(tmp_path / "reports"))
     html_path = Path(tmp_path) / "topics.html"
     html_path.write_text(HTML_SOURCE, encoding="utf-8")
@@ -243,6 +245,7 @@ def test_run_job_starts_background_execution_and_reaches_success(tmp_path, monke
 
 
 def test_job_detail_uses_same_global_report_for_any_job(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("APP_DEBUG", "true")
     monkeypatch.setenv("REPORTS_ROOT", str(tmp_path / "reports"))
     html_path = Path(tmp_path) / "topics.html"
     html_path.write_text(HTML_SOURCE, encoding="utf-8")
@@ -678,6 +681,31 @@ def test_source_edit_page_shows_common_edit_fields(tmp_path) -> None:
     assert "name='list_selector'" not in response.text
 
 
+def test_edit_source_page_shows_account_selector_for_bilibili_source(tmp_path) -> None:
+    client = create_test_client(make_sqlite_url(tmp_path, "pages-source-account-edit.db"))
+    created = client.post(
+        "/api/sources",
+        json={
+            "name": "B站UP主来源",
+            "site_name": "Bilibili",
+            "entry_url": "https://space.bilibili.com/20411266",
+            "fetch_mode": "playwright",
+            "parser_type": None,
+            "include_keywords": [],
+            "exclude_keywords": [],
+            "max_items": 30,
+            "enabled": True,
+            "source_group": "domestic",
+            "collection_strategy": "bilibili_profile_videos_recent",
+        },
+    ).json()
+
+    response = client.get(f"/sources/{created['id']}")
+
+    assert response.status_code == 200
+    assert "name='account_id'" in response.text
+
+
 def test_saving_source_edit_updates_source_and_redirects_to_sources_list(tmp_path) -> None:
     client = create_test_client(make_sqlite_url(tmp_path, "pages-source-edit-save.db"))
     created = client.post(
@@ -763,6 +791,11 @@ def test_scheduler_page_shows_settings_panel(tmp_path, monkeypatch) -> None:
     assert "启用钉钉群通知" in response.text
     assert "name='webhook'" in response.text
     assert str(get_runtime_paths(tmp_path).env_file) in response.text
+    assert "周榜筛选与推送" in response.text
+    assert "当前推送阈值" in response.text
+    assert "封面缓存保留" in response.text
+    assert "href='/weekly'" in response.text
+    assert "href='/config'" in response.text
 
 
 
@@ -963,6 +996,7 @@ def test_post_run_domestic_job_without_sources_does_not_create_empty_job(tmp_pat
 
 
 def test_job_progress_partial_renders_updated_status(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("APP_DEBUG", "true")
     monkeypatch.setenv("REPORTS_ROOT", str(tmp_path / "reports"))
     html_path = Path(tmp_path) / "topics.html"
     html_path.write_text(HTML_SOURCE, encoding="utf-8")
@@ -1003,6 +1037,7 @@ def test_job_progress_partial_renders_updated_status(tmp_path, monkeypatch) -> N
 
 
 def test_job_logs_partial_renders_error_message(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("APP_DEBUG", "true")
     monkeypatch.setenv("REPORTS_ROOT", str(tmp_path / "reports"))
     client = create_test_client(make_sqlite_url(tmp_path, "pages-logs.db"))
     client.post(
@@ -1263,14 +1298,73 @@ def test_saving_fetch_interval_settings_updates_runtime_app_env(tmp_path, monkey
 def test_scheduler_page_shows_bilibili_cookie_settings_panel(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv('HOT_RUNTIME_ROOT', str(tmp_path))
     client = create_test_client(make_sqlite_url(tmp_path, "pages-bilibili-settings.db"))
+    created = client.post(
+        '/api/site-accounts',
+        json={
+            'platform': 'bilibili',
+            'account_key': 'creator-a',
+            'display_name': '账号A',
+            'enabled': True,
+            'is_default': False,
+        },
+    )
+    assert created.status_code == 201
 
     response = client.get('/scheduler')
 
     assert response.status_code == 200
     assert 'B站登录态' in response.text
     assert "name='bilibili_cookie'" in response.text
+    assert "name='account_key'" in response.text
+    assert '账号A' in response.text
     assert '/scheduler/bilibili' in response.text
     assert '/scheduler/bilibili/browser-login' in response.text
+
+
+def test_auth_state_page_shows_bilibili_status_panel(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv('HOT_RUNTIME_ROOT', str(tmp_path))
+    runtime_paths = get_runtime_paths(tmp_path)
+    runtime_paths.ensure_directories()
+    runtime_paths.env_file.write_text(
+        "\n".join(
+            [
+                'BILIBILI_COOKIE=SESSDATA=test-sess; bili_jct=test-jct; DedeUserID=123',
+                'BILIBILI_COOKIE__CREATOR_A=SESSDATA=creator-sess; bili_jct=creator-jct; DedeUserID=456',
+                '',
+            ]
+        ),
+        encoding='utf-8',
+    )
+    runtime_paths.bilibili_user_data_dir.mkdir(parents=True, exist_ok=True)
+    runtime_paths.bilibili_storage_state_file.write_text('{"cookies":[],"origins":[]}', encoding='utf-8')
+    client = create_test_client(make_sqlite_url(tmp_path, "pages-auth-state.db"))
+    extra_account = client.post(
+        '/api/site-accounts',
+        json={
+            'platform': 'bilibili',
+            'account_key': 'creator-a',
+            'display_name': '账号A',
+            'enabled': True,
+            'is_default': False,
+        },
+    )
+    assert extra_account.status_code == 201
+    AuthStateService(runtime_root=tmp_path).build_paths('bilibili', 'creator-a').user_data_dir.mkdir(parents=True, exist_ok=True)
+    AuthStateService(runtime_root=tmp_path).build_paths('bilibili', 'creator-a').storage_state_file.write_text(
+        '{"cookies":[],"origins":[]}',
+        encoding='utf-8',
+    )
+
+    response = client.get('/auth-state')
+
+    assert response.status_code == 200
+    assert '账号态状态' in response.text
+    assert 'B站登录态' in response.text
+    assert '默认账号' in response.text
+    assert '账号A' in response.text
+    assert 'SESSDATA 已配置' in response.text
+    assert 'storage state 文件已存在' in response.text
+    assert '/scheduler' in response.text
 
 
 def test_scheduler_page_shows_bilibili_success_message(tmp_path, monkeypatch) -> None:
@@ -1311,6 +1405,38 @@ def test_saving_bilibili_cookie_updates_runtime_app_env(tmp_path, monkeypatch) -
     assert response.status_code == 303
     assert response.headers['location'] == '/scheduler?bilibili_saved=1'
     assert 'BILIBILI_COOKIE=SESSDATA=test-sess; bili_jct=test-jct; DedeUserID=123' in env_text
+
+
+def test_saving_account_scoped_bilibili_cookie_updates_runtime_app_env(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv('HOT_RUNTIME_ROOT', str(tmp_path))
+    client = create_test_client(make_sqlite_url(tmp_path, "pages-bilibili-save-account.db"))
+    created = client.post(
+        '/api/site-accounts',
+        json={
+            'platform': 'bilibili',
+            'account_key': 'creator-a',
+            'display_name': '账号A',
+            'enabled': True,
+            'is_default': False,
+        },
+    )
+    assert created.status_code == 201
+
+    response = client.post(
+        '/scheduler/bilibili',
+        data={
+            'account_key': 'creator-a',
+            'bilibili_cookie': 'SESSDATA=creator-sess; bili_jct=creator-jct; DedeUserID=456',
+        },
+        follow_redirects=False,
+    )
+
+    env_file = get_runtime_paths(tmp_path).env_file
+    env_text = env_file.read_text(encoding='utf-8')
+
+    assert response.status_code == 303
+    assert response.headers['location'] == '/scheduler?bilibili_saved=1'
+    assert 'BILIBILI_COOKIE__CREATOR_A=SESSDATA=creator-sess; bili_jct=creator-jct; DedeUserID=456' in env_text
 
 
 def test_saving_prefixed_bilibili_cookie_normalizes_before_writing_env(tmp_path, monkeypatch) -> None:
@@ -1373,6 +1499,48 @@ def test_browser_login_sync_updates_runtime_app_env(tmp_path, monkeypatch) -> No
     assert response.headers['location'] == '/scheduler?bilibili_browser_saved=1'
     env_text = get_runtime_paths(tmp_path).env_file.read_text(encoding='utf-8')
     assert 'BILIBILI_COOKIE=SESSDATA=test-sess; bili_jct=test-jct; DedeUserID=123' in env_text
+
+
+def test_browser_login_sync_uses_selected_account_key(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv('HOT_RUNTIME_ROOT', str(tmp_path))
+    client = create_test_client(make_sqlite_url(tmp_path, "pages-bilibili-browser-sync-account.db"))
+    created = client.post(
+        '/api/site-accounts',
+        json={
+            'platform': 'bilibili',
+            'account_key': 'creator-a',
+            'display_name': '账号A',
+            'enabled': True,
+            'is_default': False,
+        },
+    )
+    assert created.status_code == 201
+
+    captured: dict[str, str] = {}
+
+    class _FakeResult:
+        cookie = 'SESSDATA=creator-sess; bili_jct=creator-jct; DedeUserID=456'
+
+    from app.api import routes_pages
+
+    def _fake_login_and_sync(self, account_key='default'):
+        captured['account_key'] = account_key
+        return _FakeResult()
+
+    monkeypatch.setattr(routes_pages.BilibiliBrowserAuthService, 'login_and_sync', _fake_login_and_sync)
+
+    response = client.post(
+        '/scheduler/bilibili/browser-login',
+        data={'account_key': 'creator-a'},
+        follow_redirects=False,
+    )
+
+    env_text = get_runtime_paths(tmp_path).env_file.read_text(encoding='utf-8')
+
+    assert response.status_code == 303
+    assert response.headers['location'] == '/scheduler?bilibili_browser_saved=1'
+    assert captured['account_key'] == 'creator-a'
+    assert 'BILIBILI_COOKIE__CREATOR_A=SESSDATA=creator-sess; bili_jct=creator-jct; DedeUserID=456' in env_text
 
 
 def test_browser_login_sync_shows_error_when_browser_login_fails(tmp_path, monkeypatch) -> None:

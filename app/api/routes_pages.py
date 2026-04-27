@@ -15,16 +15,19 @@ from app.api.routes_content import query_content_items
 from app.api.routes_deliveries import query_delivery_rows
 from app.api.routes_sources import get_db_session
 from app.api.routes_subscriptions import query_subscriptions
+from app.config import get_settings
 from app.models.content_item import ContentItem
 from app.models.delivery_record import DeliveryRecord
 from app.models.subscription import Subscription
 from app.schemas.source import SourceUpdate
 from app.services.app_env_service import AppEnvService
+from app.services.auth_state_status_service import AuthStateStatusService
 from app.services.bilibili_auth_service import BilibiliBrowserAuthService
 from app.services.content_dispatch_service import ContentDispatchService
 from app.services.job_service import JobService
 from app.services.schedule_plan_service import SchedulePlanService
 from app.services.scheduler_service import SchedulerService
+from app.services.site_account_service import SiteAccountService
 from app.services.source_service import SourceService
 from app.ui.page_theme import render_badge, render_page, render_page_header, render_panel, render_stat_card
 
@@ -38,6 +41,7 @@ REPORTS_TITLE = "\u5386\u53f2\u62a5\u544a"
 CONTENT_CENTER_TITLE = "\u5185\u5bb9\u4e2d\u5fc3"
 SUBSCRIPTIONS_TITLE = "\u8ba2\u9605\u4e2d\u5fc3"
 DELIVERIES_TITLE = "\u6295\u9012\u72b6\u6001"
+AUTH_STATE_TITLE = "\u8d26\u53f7\u6001\u72b6\u6001"
 SCHEDULER_TITLE = "\u5b9a\u65f6\u8c03\u5ea6"
 NEW_SOURCE_TITLE = "\u65b0\u589e\u91c7\u96c6\u6e90"
 JOB_DETAIL_TITLE = "\u4efb\u52a1\u8be6\u60c5"
@@ -364,12 +368,78 @@ def _render_source_card(source) -> str:
     """
 
 
-def _render_source_edit_page(source, *, error: str | None = None) -> str:
+def _source_supports_account_binding(source) -> bool:
+    strategy = str(getattr(source, "collection_strategy", "") or "").strip().lower()
+    site_name = str(getattr(source, "site_name", "") or "").strip().lower()
+    return strategy.startswith("bilibili_") or site_name == "bilibili"
+
+
+def _render_site_account_select(*, accounts, selected_account_id: str | None, required_for_bilibili: bool) -> str:
+    options = [
+        "<option value=''>默认账号（未显式绑定）</option>",
+        *[
+            (
+                f"<option value='{escape(str(account.id), quote=True)}'"
+                f"{' selected' if str(account.id) == str(selected_account_id or '') else ''}>"
+                f"{escape(str(account.display_name))}"
+                f"{'（默认）' if getattr(account, 'is_default', False) else ''}"
+                "</option>"
+            )
+            for account in accounts
+        ],
+    ]
+    helper = "仅 B站来源生效；未选择时会回退到默认账号。" if required_for_bilibili else "当前来源不需要绑定账号。"
+    return (
+        "<label class='field'>"
+        "<span class='label'>执行账号</span>"
+        f"<select class='form-control' name='account_id'>{''.join(options)}</select>"
+        f"<span class='field-help'>{helper}</span>"
+        "</label>"
+    )
+
+
+def _render_bilibili_account_key_select(*, accounts, selected_account_key: str = 'default') -> str:
+    normalized_selected = str(selected_account_key or 'default').strip() or 'default'
+    options = [
+        (
+            "<option value='default'"
+            f"{' selected' if normalized_selected == 'default' else ''}>默认账号</option>"
+        ),
+        *[
+            (
+                f"<option value='{escape(str(account.account_key), quote=True)}'"
+                f"{' selected' if str(account.account_key) == normalized_selected else ''}>"
+                f"{escape(str(account.display_name))}"
+                f"{'（默认）' if getattr(account, 'is_default', False) else ''}"
+                "</option>"
+            )
+            for account in accounts
+        ],
+    ]
+    return (
+        "<label class='field'>"
+        "<span class='label'>账号槽位</span>"
+        f"<select class='form-control' name='account_key'>{''.join(options)}</select>"
+        "<span class='field-help'>默认账号写入 BILIBILI_COOKIE；额外账号会写入各自的 BILIBILI_COOKIE__ACCOUNT_KEY。</span>"
+        "</label>"
+    )
+
+
+def _render_source_edit_page(source, *, site_accounts, error: str | None = None) -> str:
     checked = "checked" if getattr(source, "enabled", False) else ""
     group_value = str(getattr(source, "source_group", "") or "domestic")
     schedule_group_value = str(getattr(source, "schedule_group", "") or "")
     search_keyword = str(getattr(source, "search_keyword", "") or "")
     error_html = f"<p class='helper-note'>{escape(error)}</p>" if error else ""
+    account_field = (
+        _render_site_account_select(
+            accounts=site_accounts,
+            selected_account_id=str(getattr(source, "account_id", "") or ""),
+            required_for_bilibili=True,
+        )
+        if _source_supports_account_binding(source)
+        else ""
+    )
     form = f"""
     <form method='post' action='/sources/{source.id}' class='scheduler-form scheduler-settings-panel'>
       {error_html}
@@ -398,6 +468,7 @@ def _render_source_edit_page(source, *, error: str | None = None) -> str:
           <span class='label'>调度分组</span>
           <input class='form-control' name='schedule_group' value='{escape(schedule_group_value, quote=True)}' placeholder='如 morning / evening；留空则不参与定时任务' />
         </label>
+        {account_field}
         <label class='field'>
           <span class='label'>最大条数</span>
           <input class='form-control' name='max_items' value='{escape(str(source.max_items), quote=True)}' />
@@ -635,13 +706,17 @@ def _render_scheduler_page(
     session: Session,
     *,
     bilibili_form_value: str | None = None,
+    bilibili_selected_account_key: str = 'default',
     bilibili_error: str | None = None,
     bilibili_success: str | None = None,
 ) -> str:
     settings = SchedulerService(session).get_settings()
+    app_settings = get_settings()
     app_env_service = AppEnvService()
     dingtalk_settings = app_env_service.get_dingtalk_settings()
-    bilibili_settings = app_env_service.get_bilibili_settings()
+    bilibili_accounts = SiteAccountService(session).list_accounts(platform='bilibili')
+    selected_bilibili_account_key = str(bilibili_selected_account_key or 'default').strip() or 'default'
+    bilibili_settings = app_env_service.get_bilibili_settings(account_key=selected_bilibili_account_key)
     network_settings = app_env_service.get_network_settings()
     fetch_interval_settings = app_env_service.get_fetch_interval_settings()
     schedule_plans = SchedulePlanService(session).list_plans()
@@ -652,6 +727,8 @@ def _render_scheduler_page(
     bilibili_cookie_status = "已配置" if bilibili_settings.cookie.strip() else "未配置"
     network_enabled_text = "已启用" if network_settings.enabled else "已停用"
     network_checked = "checked" if network_settings.enabled else ""
+    weekly_threshold = str(app_settings.weekly_grade_push_threshold or "B+").strip() or "B+"
+    weekly_cover_retention_days = int(max(int(app_settings.weekly_cover_cache_retention_days or 60), 1))
     bilibili_value = bilibili_settings.cookie if bilibili_form_value is None else bilibili_form_value
     bilibili_feedback = ""
     if bilibili_success:
@@ -745,6 +822,7 @@ def _render_scheduler_page(
     bilibili_form = f"""
     <form method='post' action='/scheduler/bilibili' class='scheduler-form scheduler-settings-panel'>
       {bilibili_feedback}
+      {_render_bilibili_account_key_select(accounts=bilibili_accounts, selected_account_key=selected_bilibili_account_key)}
       <div class='field'>
         <span class='label'>完整 Cookie</span>
         <textarea name='bilibili_cookie' rows='6' placeholder='SESSDATA=...; bili_jct=...; DedeUserID=...'>{escape(bilibili_value)}</textarea>
@@ -753,6 +831,7 @@ def _render_scheduler_page(
       <div class='page-actions'>{_button_submit('保存B站登录态', 'button-primary')}</div>
     </form>
     <form method='post' action='/scheduler/bilibili/browser-login' class='scheduler-form scheduler-settings-panel'>
+      {_render_bilibili_account_key_select(accounts=bilibili_accounts, selected_account_key=selected_bilibili_account_key)}
       <p class='helper-note'>如果手工复制 Cookie 很容易触发风控，可直接点下面按钮，系统会打开本机浏览器让你完成登录，并自动把最新登录态同步到 {escape(str(bilibili_settings.env_file))}。</p>
       <div class='page-actions'>{_button_submit('打开浏览器登录并同步', 'button-primary')}</div>
     </form>
@@ -795,6 +874,18 @@ def _render_scheduler_page(
       <div class='page-actions'>{_button_submit('保存采集节流', 'button-primary')}</div>
     </form>
     """
+    weekly_panel = (
+        "<div class='helper-note'>"
+        "周榜页用于人工筛选最近 7 天热点内容；只有人工评分达到阈值的条目，点击“批量推送达标项”后才会发到钉钉。"
+        "</div>"
+        + "<div class='stats-grid'>"
+        + render_stat_card('当前推送阈值', weekly_threshold, '人工评分达到该等级及以上时，/weekly 批量推送才会发到钉钉')
+        + render_stat_card('封面缓存保留', f'{weekly_cover_retention_days} 天', '后台任务会按该周期清理 outputs/weekly-covers 中的旧文件')
+        + "</div>"
+        + "<div class='helper-note'>如需实际操作，请前往 <a href='/weekly'>最近一周热点</a> 打分和推送；如需调整阈值与缓存策略，请前往 <a href='/config'>配置中心</a> 的 weekly 分组。</div>"
+        + f"<div class='helper-note'>这些配置同样会持久化到 {escape(str(dingtalk_settings.env_file))}。</div>"
+        + f"<div class='page-actions'>{_button_link('前往最近一周热点', '/weekly', 'button-primary')}{_button_link('前往配置中心', '/config')}</div>"
+    )
     content = (
         render_page_header(
             eyebrow='Scheduler',
@@ -809,8 +900,75 @@ def _render_scheduler_page(
         + render_panel('B站登录态', bilibili_form, extra_class='scheduler-settings-panel')
         + render_panel('站点网络访问', network_form, extra_class='scheduler-settings-panel')
         + render_panel('采集节流', fetch_interval_form, extra_class='scheduler-settings-panel')
+        + render_panel('周榜筛选与推送', weekly_panel, extra_class='scheduler-settings-panel')
     )
     return render_page(title=SCHEDULER_TITLE, content=content, body_class='theme-dark')
+
+
+def _render_auth_state_page() -> str:
+    snapshot = AuthStateStatusService().build_snapshot()
+    platform = snapshot["platforms"][0]
+    summary = (
+        "<div class='stats-grid'>"
+        f"{render_stat_card('总体状态', str(snapshot['status']), '多账号账号态巡检结果')}"
+        f"{render_stat_card('运行目录', str(snapshot['runtime_root']), '当前 login state 读取根目录')}"
+        f"{render_stat_card('建议动作', str(platform['action_hint']), '需要修复时优先去调度页重新同步')}"
+        "</div>"
+    )
+    account_cards = []
+    for account in platform["accounts"]:
+        issues_html = (
+            "".join(f"<li>{escape(str(issue))}</li>" for issue in account["issues"])
+            if account["issues"]
+            else "<li>当前未发现额外问题</li>"
+        )
+        badge_tone = (
+            "success" if account["status"] == "ok"
+            else "warning" if account["status"] == "warning"
+            else "danger" if account["status"] == "error"
+            else "neutral"
+        )
+        account_cards.append(
+            f"""
+            <article class='resource-card'>
+              <div class='kicker'>{escape(str(account['account_key']))}</div>
+              <h3>{escape(str(account['display_name']))}{'（默认账号）' if account['is_default'] else ''}</h3>
+              <p>{render_badge(str(account['status']), badge_tone)}</p>
+              <ul>
+                <li>{'SESSDATA 已配置' if account['cookie_configured'] else 'SESSDATA 未配置'}</li>
+                <li>{'storage state 文件已存在' if account['storage_state_exists'] else 'storage state 文件缺失'}</li>
+                <li>{'浏览器 user-data 目录已存在' if account['user_data_dir_exists'] else '浏览器 user-data 目录缺失'}</li>
+              </ul>
+              <p><strong>storage state:</strong> {escape(str(account['storage_state_file']))}</p>
+              <p><strong>user-data:</strong> {escape(str(account['user_data_dir']))}</p>
+              <p><strong>建议动作:</strong> {escape(str(account['action_hint']))}</p>
+              <ul>{issues_html}</ul>
+            </article>
+            """
+        )
+    platform_body = (
+        "<div class='stack-list'>"
+        f"<p>{render_badge(str(platform['status']), 'success' if platform['status'] == 'ok' else 'warning' if platform['status'] == 'warning' else 'danger' if platform['status'] == 'error' else 'neutral')}</p>"
+        f"<div class='resource-grid'>{''.join(account_cards)}</div>"
+        f"<div class='page-actions'>{_button_link('前往调度页处理', '/scheduler')}</div>"
+        "</div>"
+    )
+    content = (
+        render_page_header(
+            eyebrow='Auth',
+            title=AUTH_STATE_TITLE,
+            subtitle='集中查看当前多账号登录态是否完整，首版只覆盖 B站。',
+            actions=_button_link('返回首页', '/'),
+        )
+        + summary
+        + render_panel('B站登录态', platform_body, extra_class='scheduler-settings-panel')
+    )
+    return render_page(title=AUTH_STATE_TITLE, content=content, body_class='theme-dark')
+
+
+@router.get('/auth-state', response_class=HTMLResponse)
+def auth_state_page() -> str:
+    return _render_auth_state_page()
 
 
 @router.get("/scheduler", response_class=HTMLResponse)
@@ -861,13 +1019,15 @@ async def save_dingtalk_settings(request: Request) -> RedirectResponse:
 @router.post('/scheduler/bilibili')
 async def save_bilibili_settings(request: Request, session: Session = Depends(get_db_session)) -> Response:
     form_data = parse_qs((await request.body()).decode('utf-8'))
+    account_key = form_data.get('account_key', ['default'])[0].strip() or 'default'
     bilibili_cookie = form_data.get('bilibili_cookie', [''])[0]
     try:
-        AppEnvService().update_bilibili_settings(cookie=bilibili_cookie)
+        AppEnvService().update_bilibili_settings(cookie=bilibili_cookie, account_key=account_key)
     except ValueError as exc:
         html = _render_scheduler_page(
             session,
             bilibili_form_value=bilibili_cookie,
+            bilibili_selected_account_key=account_key,
             bilibili_error=str(exc),
         )
         return HTMLResponse(content=html, status_code=422)
@@ -875,14 +1035,21 @@ async def save_bilibili_settings(request: Request, session: Session = Depends(ge
 
 
 @router.post('/scheduler/bilibili/browser-login')
-async def sync_bilibili_settings_from_browser(session: Session = Depends(get_db_session)) -> Response:
+async def sync_bilibili_settings_from_browser(request: Request, session: Session = Depends(get_db_session)) -> Response:
+    form_data = parse_qs((await request.body()).decode('utf-8'))
+    account_key = form_data.get('account_key', ['default'])[0].strip() or 'default'
     try:
-        result = BilibiliBrowserAuthService().login_and_sync()
+        browser_auth_service = BilibiliBrowserAuthService()
+        if account_key == 'default':
+            result = browser_auth_service.login_and_sync()
+        else:
+            result = browser_auth_service.login_and_sync(account_key=account_key)
         if getattr(result, 'cookie', '').strip():
-            AppEnvService().update_bilibili_settings(cookie=result.cookie)
+            AppEnvService().update_bilibili_settings(cookie=result.cookie, account_key=account_key)
     except RuntimeError as exc:
         html = _render_scheduler_page(
             session,
+            bilibili_selected_account_key=account_key,
             bilibili_error=str(exc),
         )
         return HTMLResponse(content=html, status_code=422)
@@ -953,7 +1120,12 @@ def sources_page(request: Request, session: Session = Depends(get_db_session)) -
 
 
 @router.get('/sources/new', response_class=HTMLResponse)
-def new_source_page() -> str:
+def new_source_page(session: Session = Depends(get_db_session)) -> str:
+    account_field = _render_site_account_select(
+        accounts=SiteAccountService(session).list_accounts(platform="bilibili"),
+        selected_account_id=None,
+        required_for_bilibili=True,
+    )
     form = f"""
     <form method='post' action='/api/sources/form' class='source-wizard'>
       <section class='source-step-panel'>
@@ -996,6 +1168,7 @@ def new_source_page() -> str:
             <span class='label'>调度分组</span>
             <input class='form-control' name='schedule_group' placeholder='例如：morning；留空则不参与定时任务' />
           </label>
+          {account_field}
           <label class='field'>
             <span class='label'>\u6700\u5927\u6761\u6570</span>
             <input class='form-control' name='max_items' value='30' />
@@ -1322,7 +1495,8 @@ async def retry_failed_deliveries_page(request: Request, session: Session = Depe
 @router.get('/sources/{source_id}', response_class=HTMLResponse)
 def edit_source_page(source_id: str, session: Session = Depends(get_db_session)) -> str:
     source = _get_source_or_404(session, source_id)
-    return _render_source_edit_page(source)
+    site_accounts = SiteAccountService(session).list_accounts(platform="bilibili")
+    return _render_source_edit_page(source, site_accounts=site_accounts)
 
 
 @router.post('/sources/{source_id}')
@@ -1337,6 +1511,7 @@ async def save_source_page(source_id: str, request: Request, session: Session = 
             search_keyword=(form_data.get('search_keyword', [''])[0].strip() or None),
             source_group=form_data.get('source_group', [str(getattr(source, 'source_group', '') or '')])[0].strip() or None,
             schedule_group=form_data.get('schedule_group', [str(getattr(source, 'schedule_group', '') or '')])[0].strip() or None,
+            account_id=(form_data.get('account_id', [''])[0].strip() or None),
             max_items=form_data.get('max_items', [str(source.max_items)])[0].strip(),
             enabled=form_data.get('enabled', [None])[0] == 'true',
         )
@@ -1347,9 +1522,11 @@ async def save_source_page(source_id: str, request: Request, session: Session = 
         source.search_keyword = form_data.get('search_keyword', [''])[0] or None
         source.source_group = form_data.get('source_group', [str(getattr(source, 'source_group', '') or '')])[0] or None
         source.schedule_group = form_data.get('schedule_group', [str(getattr(source, 'schedule_group', '') or '')])[0] or None
+        source.account_id = form_data.get('account_id', [''])[0] or None
         source.max_items = form_data.get('max_items', [str(source.max_items)])[0]
         source.enabled = form_data.get('enabled', [None])[0] == 'true'
-        return HTMLResponse(content=_render_source_edit_page(source, error=message), status_code=422)
+        site_accounts = SiteAccountService(session).list_accounts(platform="bilibili")
+        return HTMLResponse(content=_render_source_edit_page(source, site_accounts=site_accounts, error=message), status_code=422)
 
     updated = SourceService(session).update_source(source_id, payload)
     if updated is None:
@@ -1495,7 +1672,12 @@ def _read_current_env_values() -> dict[str, str]:
     return values
 
 
-def _render_config_center_page(error: str | None = None, saved_keys: list[str] | None = None, field_errors: dict[str, str] | None = None) -> str:
+def _render_config_center_page(
+    error: str | None = None,
+    saved_keys: list[str] | None = None,
+    field_errors: dict[str, str] | None = None,
+    return_to: str | None = None,
+) -> str:
     saved_keys = saved_keys or []
     field_errors = field_errors or {}
     current = _read_current_env_values()
@@ -1522,23 +1704,51 @@ def _render_config_center_page(error: str | None = None, saved_keys: list[str] |
 </tr>
                 '''
             )
+        group_intro = ""
+        if group == "weekly":
+            group_intro = (
+                "<div class='helper-note'>"
+                "这组配置用于 <code>/weekly</code> 周榜页："
+                "<code>WEEKLY_GRADE_PUSH_THRESHOLD</code> 控制批量推送阈值，"
+                "<code>WEEKLY_COVER_CACHE_RETENTION_DAYS</code> 控制本地封面缓存清理周期。"
+                "可直接前往 <a href='/weekly'>最近一周热点</a> 查看实际效果。"
+                "</div>"
+            )
         sections.append(
             render_panel(
                 title=f'{group}',
-                content=f'<table class="config-table"><tbody>{"".join(rows)}</tbody></table>',
+                content=group_intro + f'<table class="config-table"><tbody>{"".join(rows)}</tbody></table>',
             )
         )
 
     saved_html = ''
     if saved_keys:
         saved_html = f'<div class="banner banner-success">已保存:{", ".join(escape(k) for k in saved_keys)}</div>'
+        weekly_saved = any(key in {"WEEKLY_GRADE_PUSH_THRESHOLD", "WEEKLY_COVER_CACHE_RETENTION_DAYS"} for key in saved_keys)
+        if weekly_saved:
+            current = _read_current_env_values()
+            weekly_threshold = escape(str(current.get("WEEKLY_GRADE_PUSH_THRESHOLD", "B+")).strip() or "B+")
+            weekly_retention = escape(str(current.get("WEEKLY_COVER_CACHE_RETENTION_DAYS", "60")).strip() or "60")
+            saved_html += (
+                "<div class='helper-note'>"
+                f"weekly 配置已更新。当前推送阈值：{weekly_threshold}；封面缓存保留：{weekly_retention} 天。"
+                "可直接前往 <a href='/weekly?config_updated=1'>最近一周热点</a> 查看已生效配置。"
+                "</div>"
+            )
+            if return_to == "weekly":
+                saved_html += (
+                    "<div class='page-actions'>"
+                    "<a class='button button-primary' href='/weekly?config_updated=1'>返回最近一周热点</a>"
+                    "</div>"
+                )
     error_html = f'<div class="banner banner-error">{escape(error)}</div>' if error else ''
+    form_action = "/config?return_to=weekly" if return_to == "weekly" else "/config"
 
     body = f'''
 {render_page_header(eyebrow='运维', title='配置中心', subtitle='REQ-CFG-010 — 集中查看与修改全部环境变量(敏感字段以掩码显示)')}
 {saved_html}
 {error_html}
-<form method="post" action="/config" class="config-center-form">
+<form method="post" action="{form_action}" class="config-center-form">
   {''.join(sections)}
   <div class="actions"><button type="submit" class="primary">保存全部</button></div>
 </form>
@@ -1547,9 +1757,9 @@ def _render_config_center_page(error: str | None = None, saved_keys: list[str] |
 
 
 @router.get('/config', response_class=HTMLResponse)
-def config_center_page() -> str:
+def config_center_page(request: Request) -> str:
     """TC-API-101: 配置中心页,渲染所有分组。"""
-    return _render_config_center_page()
+    return _render_config_center_page(return_to=request.query_params.get("return_to"))
 
 
 @router.post('/config')
@@ -1557,6 +1767,7 @@ async def save_config_center(request: Request) -> Response:
     """TC-API-102 / TC-API-103: 保存合法值持久化;非法值 422 + 行级错误。"""
     form_data = parse_qs((await request.body()).decode('utf-8'))
     submitted: dict[str, str] = {k: v[0] for k, v in form_data.items() if v}
+    return_to = request.query_params.get("return_to")
 
     try:
         # 用 schema 重新构造一次以校验所有提交字段
@@ -1578,6 +1789,7 @@ async def save_config_center(request: Request) -> Response:
         html = _render_config_center_page(
             error='保存失败:存在非法字段,请修正后重试',
             field_errors=field_errors,
+            return_to=return_to,
         )
         return HTMLResponse(content=html, status_code=422)
 
@@ -1602,6 +1814,6 @@ async def save_config_center(request: Request) -> Response:
         service._write_values({**_read_current_env_values(), **write_payload})  # noqa: SLF001 — 内部 API 复用
 
     return HTMLResponse(
-        content=_render_config_center_page(saved_keys=saved_keys),
+        content=_render_config_center_page(saved_keys=saved_keys, return_to=return_to),
         status_code=200,
     )

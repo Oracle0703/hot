@@ -46,6 +46,7 @@ def _run_job_and_wait_for_report(client, *, max_attempts: int = 20) -> tuple[str
 
 
 def test_reports_page_lists_generated_report_and_download_works(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("APP_DEBUG", "true")
     monkeypatch.setenv("REPORTS_ROOT", str(tmp_path / "reports"))
     html_path = Path(tmp_path) / "topics.html"
     html_path.write_text(HTML_SOURCE, encoding="utf-8")
@@ -109,6 +110,7 @@ def test_reports_page_lists_generated_report_and_download_works(tmp_path, monkey
 
 
 def test_reports_page_shows_single_global_report_after_two_runs(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("APP_DEBUG", "true")
     monkeypatch.setenv("REPORTS_ROOT", str(tmp_path / "reports"))
     html_path = Path(tmp_path) / "topics.html"
     html_path.write_text(HTML_SOURCE, encoding="utf-8")
@@ -145,6 +147,7 @@ def test_reports_page_shows_single_global_report_after_two_runs(tmp_path, monkey
 
 
 def test_reports_page_can_clear_collected_items_for_crawl_testing(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("APP_DEBUG", "true")
     monkeypatch.setenv("REPORTS_ROOT", str(tmp_path / "reports"))
     html_path = Path(tmp_path) / "topics.html"
     html_path.write_text(HTML_SOURCE, encoding="utf-8")
@@ -286,6 +289,8 @@ def test_weekly_page_lists_recent_week_items_in_requested_columns(tmp_path, monk
     assert "评论数" in response.text
     assert "发布时间" in response.text
     assert "当前推送阈值" in response.text
+    assert "/config?return_to=weekly" in response.text
+    assert "WEEKLY_GRADE_PUSH_THRESHOLD" in response.text
     assert "周内视频一" in response.text
     assert "https://www.bilibili.com/video/BV1TEST111/" in response.text
     assert "img" in response.text
@@ -471,3 +476,86 @@ def test_weekly_page_supports_saving_manual_grades_and_batch_pushing(tmp_path, m
         assert second_item is not None
         assert first_item.pushed_to_dingtalk_at is not None
         assert second_item.pushed_to_dingtalk_at is None
+
+
+def test_weekly_page_push_shows_empty_feedback_when_no_item_matches_threshold(tmp_path, monkeypatch) -> None:
+    database_url = make_sqlite_url(tmp_path, "weekly-rating-push-empty-page.db")
+    client = create_test_client(database_url)
+    now = datetime(2026, 4, 23, 20, 0, 0)
+    monkeypatch.setenv("ENABLE_DINGTALK_NOTIFIER", "true")
+    monkeypatch.setenv("DINGTALK_WEBHOOK", "https://oapi.dingtalk.com/robot/send?access_token=test-token")
+    monkeypatch.setenv("WEEKLY_GRADE_PUSH_THRESHOLD", "A")
+
+    from app.api import routes_reports
+    from app.services import weekly_dingtalk_push_service
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def utcnow(cls) -> datetime:
+            return now
+
+    pushed_requests: list[dict[str, object]] = []
+
+    def fake_sender(webhook: str, payload: dict[str, object], timeout_seconds: float, secret: str | None) -> None:
+        pushed_requests.append({"webhook": webhook, "payload": payload})
+
+    monkeypatch.setattr(routes_reports, "datetime", FrozenDateTime)
+    monkeypatch.setattr(weekly_dingtalk_push_service, "datetime", FrozenDateTime)
+    monkeypatch.setattr(weekly_dingtalk_push_service.WeeklyDingTalkPushService, "_send", staticmethod(fake_sender))
+
+    with SessionFactoryHolder.factory() as session:
+        source = Source(
+            name="测试来源",
+            site_name="Bilibili",
+            entry_url="https://space.bilibili.com/281232336",
+            fetch_mode="http",
+            parser_type="generic_css",
+            max_items=10,
+            enabled=True,
+        )
+        session.add(source)
+        session.commit()
+        session.refresh(source)
+        item = CollectedItem(
+            source_id=source.id,
+            job_id=as_uuid("33333333-3333-3333-3333-333333333333"),
+            first_seen_job_id=as_uuid("33333333-3333-3333-3333-333333333333"),
+            last_seen_job_id=as_uuid("33333333-3333-3333-3333-333333333333"),
+            title="未达阈值视频",
+            url="https://www.bilibili.com/video/BV1RATE333/",
+            published_at=now - timedelta(hours=3),
+            published_at_text="2026-04-23 17:00:00",
+            first_seen_at=now - timedelta(days=1),
+            last_seen_at=now - timedelta(days=1),
+            like_count=30,
+            view_count=5000,
+            reply_count=10,
+            manual_grade="B+",
+            normalized_hash="weekly-rating-push-empty-1",
+        )
+        session.add(item)
+        session.commit()
+
+    push_response = client.post("/weekly/push", follow_redirects=False)
+
+    assert push_response.status_code == 303
+    assert push_response.headers["location"] == "/weekly?push_empty=1"
+    assert pushed_requests == []
+
+    weekly_page = client.get(push_response.headers["location"])
+
+    assert weekly_page.status_code == 200
+    assert "当前没有达到阈值且未推送的内容。" in weekly_page.text
+
+
+def test_weekly_page_shows_config_updated_feedback_with_current_settings(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("WEEKLY_GRADE_PUSH_THRESHOLD", "A")
+    monkeypatch.setenv("WEEKLY_COVER_CACHE_RETENTION_DAYS", "45")
+    client = create_test_client(make_sqlite_url(tmp_path, "weekly-config-updated-page.db"))
+
+    response = client.get("/weekly?config_updated=1")
+
+    assert response.status_code == 200
+    assert "周榜配置已更新。" in response.text
+    assert "当前推送阈值为 A" in response.text
+    assert "封面缓存保留 45 天" in response.text

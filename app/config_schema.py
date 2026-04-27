@@ -102,8 +102,16 @@ class SettingsSchema(BaseSettings):
     source_fetch_interval_seconds: int = Field(default=0, alias="SOURCE_FETCH_INTERVAL_SECONDS", json_schema_extra=_meta(GROUP_SOURCE))
 
     # ---- weekly ----
-    weekly_cover_cache_retention_days: int = Field(default=60, alias="WEEKLY_COVER_CACHE_RETENTION_DAYS", json_schema_extra=_meta(GROUP_WEEKLY))
-    weekly_grade_push_threshold: str = Field(default="B+", alias="WEEKLY_GRADE_PUSH_THRESHOLD", json_schema_extra=_meta(GROUP_WEEKLY))
+    weekly_cover_cache_retention_days: int = Field(
+        default=60,
+        alias="WEEKLY_COVER_CACHE_RETENTION_DAYS",
+        json_schema_extra=_meta(GROUP_WEEKLY, description="周榜封面缓存保留天数"),
+    )
+    weekly_grade_push_threshold: str = Field(
+        default="B+",
+        alias="WEEKLY_GRADE_PUSH_THRESHOLD",
+        json_schema_extra=_meta(GROUP_WEEKLY, description="周榜批量推送的人工评分阈值，支持 S/A+/A/B+/B/C/D"),
+    )
 
     # ---------- 字段级校验 ----------
     @field_validator("debug", "enable_scheduler", "enable_dingtalk_notifier", "enable_site_proxy_rules", mode="before")

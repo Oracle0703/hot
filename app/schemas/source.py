@@ -52,6 +52,7 @@ class SourceCreate(BaseModel):
     schedule_group: str | None = Field(default=None, max_length=100)
     collection_strategy: CollectionStrategy = "generic_css"
     search_keyword: str | None = Field(default=None, max_length=200)
+    account_id: UUID | None = None
 
     @field_validator("entry_url")
     @classmethod
@@ -79,6 +80,7 @@ class SourceUpdate(BaseModel):
     schedule_group: str | None = Field(default=None, max_length=100)
     collection_strategy: CollectionStrategy | None = None
     search_keyword: str | None = Field(default=None, max_length=200)
+    account_id: UUID | None = None
 
     @field_validator("entry_url")
     @classmethod
@@ -107,3 +109,4 @@ class SourceRead(BaseModel):
     schedule_group: str | None
     collection_strategy: str
     search_keyword: str | None
+    account_id: UUID | None

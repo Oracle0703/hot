@@ -104,6 +104,7 @@ def _build_form_payload(form_data: dict[str, list[str]]) -> SourceCreate:
     parser_type = _normalize_optional_text(_get_form_value(form_data, "parser_type"))
     source_group = _normalize_optional_text(_get_form_value(form_data, "source_group"))
     schedule_group = _normalize_optional_text(_get_form_value(form_data, "schedule_group"))
+    account_id = _normalize_optional_text(_get_form_value(form_data, "account_id"))
 
     if not source_group:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="source_group is required")
@@ -147,6 +148,7 @@ def _build_form_payload(form_data: dict[str, list[str]]) -> SourceCreate:
             schedule_group=schedule_group,
             collection_strategy=strategy,
             search_keyword=search_keyword,
+            account_id=account_id,
         )
     except ValidationError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=exc.errors()) from exc

@@ -25,10 +25,11 @@
 
 | 项目 | 状态 | 说明 |
 | --- | --- | --- |
-| 桌面壳实体应用 | 未完成 | 当前仅完成 `desktop-manifest`、schema、consumer 示例与本地控制面契约，尚未实现 Electron / Tauri 壳体 |
-| 托盘/系统通知 | 未完成 | 当前仍由现有 launcher、页面和脚本承担本地运行交互 |
-| 多账号体系 | 未完成 | 当前仍按单用户、固定运行目录设计 |
-| 独立账号态状态页 | 未完成 | 已有登录态服务与相关能力，但尚未单独抽出账号态巡检页 |
+| 桌面壳实体应用 | 已完成 | 已提供 Electron 最小壳体、桌面壳构建脚本，并纳入 release / 离线包 / 升级包 |
+| 托盘/系统通知 | 已完成 | Electron 壳体已支持托盘常驻、最小化到托盘、状态轮询和系统通知 |
+| 多账号体系 | 已完成（B站首版） | 已支持 `site_accounts`、`sources.account_id`、默认账号回退与 B站按账号执行 |
+| 独立账号态状态页 | 已完成 | 已提供 `/auth-state` 页面与 `/system/auth-state` 快照接口，集中展示多账号登录态巡检结果 |
+| 周榜评分/推送运营闭环 | 已完成 | `/weekly`、`/config`、`/scheduler`、README / 发布说明之间的阈值配置、反馈提示与返回路径已补齐 |
 
 ## 当前仓库关键入口
 
@@ -44,6 +45,8 @@
 | `app/models/item.py:12-43` | 当前采集内容表 `CollectedItem` |
 | `app/services/report_service.py:26-497` | 落库 `CollectedItem` 并生成报告 |
 | `app/services/weekly_dingtalk_push_service.py:20-103` | 当前人工筛选后钉钉推送 |
+| `app/api/routes_reports.py:93-307` | 周榜评分、批量推送、配置回流提示 |
+| `app/api/routes_pages.py:704-888,1675-1765` | 调度页 / 配置中心的周榜运营入口与保存反馈 |
 
 ## Task 1（已完成）: 收敛单用户登录态与浏览器状态管理
 
@@ -470,5 +473,5 @@ git commit -m "docs: finalize implementation guidance for content center rollout
 | 兼容策略 | `CollectedItem` 暂不立刻删除，先作为报告兼容层保留一轮迭代 |
 | 数据库策略 | 先写 Alembic 迁移，不做跳表直改 |
 | UI 策略 | 继续沿用现有页面风格，不在本轮重做前端框架 |
-| 登录策略 | 当前计划按单用户运行，不提前引入多账号模型 |
-| 桌面壳策略 | 本计划不引入 Electron / Tauri，仅保留后续接入空间 |
+| 登录策略 | 原计划先从单用户收敛起步；当前仓库已扩展为 B站首版多账号模型，并保留默认账号回退 |
+| 桌面壳策略 | 原计划只保留后续接入空间；当前仓库已补齐 Electron 最小壳体、托盘/通知与 release 集成 |

@@ -21,6 +21,7 @@ from app.config import get_settings
 from app.models.job import CollectionJob
 from app.runtime_paths import RuntimePaths, get_runtime_paths
 from app.schemas.system_manifest import DesktopManifest
+from app.services.auth_state_status_service import AuthStateStatusService
 from app.services import cancel_registry
 from app.services.version_service import get_version_info
 
@@ -210,6 +211,7 @@ def desktop_manifest(request: Request) -> DesktopManifest:
             {"id": "content", "label": "内容中心", "href": "/content-center"},
             {"id": "subscriptions", "label": "订阅中心", "href": "/subscriptions"},
             {"id": "deliveries", "label": "投递状态", "href": "/deliveries"},
+            {"id": "auth-state", "label": "账号态", "href": "/auth-state"},
             {"id": "scheduler", "label": "调度设置", "href": "/scheduler"},
         ],
         runtime={
@@ -220,6 +222,11 @@ def desktop_manifest(request: Request) -> DesktopManifest:
         service=_desktop_service_manifest(request),
         control=_desktop_control_manifest(paths),
     )
+
+
+@router.get("/auth-state")
+def system_auth_state() -> dict[str, Any]:
+    return AuthStateStatusService().build_snapshot()
 
 
 @router.get("/health/extended")

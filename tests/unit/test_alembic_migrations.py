@@ -27,6 +27,7 @@ def test_upgrade_head_creates_baseline_on_empty_db(tmp_path) -> None:
     assert "alembic_version" in tables
     for required in (
         "sources",
+        "site_accounts",
         "collection_jobs",
         "collected_items",
         "job_logs",
@@ -38,6 +39,8 @@ def test_upgrade_head_creates_baseline_on_empty_db(tmp_path) -> None:
         assert required in tables, required
     delivery_columns = {column["name"] for column in insp.get_columns("delivery_records")}
     assert "error_message" in delivery_columns
+    source_columns = {column["name"] for column in insp.get_columns("sources")}
+    assert "account_id" in source_columns
 
 
 def test_upgrade_head_preserves_legacy_data(tmp_path) -> None:

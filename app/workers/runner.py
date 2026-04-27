@@ -246,7 +246,12 @@ class JobRunner:
             if host.startswith("www."):
                 host = host[4:]
             platform = host.split(".", 1)[0] or "unknown"
-        return f"{platform}:single-user"
+        account_key = str(getattr(source, "account_key", "") or "").strip()
+        if not account_key:
+            account = getattr(source, "account", None)
+            if account is not None and getattr(account, "account_key", None):
+                account_key = str(account.account_key)
+        return f"{platform}:{account_key or 'default'}"
 
     def _schedule_notification_background(self, task: Callable[[], None]) -> None:
         thread = threading.Thread(target=task, daemon=True)

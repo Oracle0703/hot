@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 from sqlalchemy import select
 
@@ -74,3 +75,17 @@ def test_runner_can_use_real_source_execution_service(tmp_path) -> None:
         assert job.success_sources == 1
         assert job.failed_sources == 0
         assert logs == []
+
+
+def test_job_runner_builds_account_scoped_circuit_breaker_bucket(tmp_path) -> None:
+    os.environ["DATABASE_URL"] = make_database_url(tmp_path, "runner-bucket.db")
+    engine = get_engine()
+    Base.metadata.create_all(bind=engine)
+    session_factory = create_session_factory()
+    runner = JobRunner(session_factory=session_factory, source_executor=lambda source: {"item_count": 0, "items": []})
+
+    bucket = runner._build_circuit_breaker_bucket(
+        SimpleNamespace(site_name="Bilibili", account_key="creator-a", entry_url="https://space.bilibili.com/20411266")
+    )
+
+    assert bucket == "bilibili:creator-a"

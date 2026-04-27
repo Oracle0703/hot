@@ -1,7 +1,12 @@
 ﻿import sqlite3
 import time
 from pathlib import Path
+from uuid import uuid4
 
+from sqlalchemy import create_engine
+
+from app.db import create_session_factory
+from app.models.site_account import SiteAccount
 from tests.conftest import create_test_client, make_sqlite_url
 
 
@@ -40,6 +45,49 @@ def test_create_source_returns_201_and_payload(tmp_path) -> None:
     assert data["collection_strategy"] == "bilibili_site_search"
     assert data["search_keyword"] == "游戏"
     assert data["source_group"] == "domestic"
+
+
+def test_create_source_returns_account_id_when_bound(tmp_path) -> None:
+    db_url = make_sqlite_url(tmp_path, "create-source-account.db")
+    client = create_test_client(db_url)
+    engine = create_engine(db_url, future=True)
+    factory = create_session_factory(engine=engine)
+    account_id = uuid4()
+    with factory() as session:
+        session.add(
+            SiteAccount(
+                id=account_id,
+                platform="bilibili",
+                account_key="creator-a",
+                display_name="账号A",
+                enabled=True,
+                is_default=False,
+            )
+        )
+        session.commit()
+
+    response = client.post(
+        "/api/sources",
+        json={
+            "name": "B站UP主来源",
+            "site_name": "Bilibili",
+            "entry_url": "https://space.bilibili.com/20411266",
+            "fetch_mode": "playwright",
+            "parser_type": None,
+            "include_keywords": [],
+            "exclude_keywords": [],
+            "max_items": 30,
+            "enabled": True,
+            "collection_strategy": "bilibili_profile_videos_recent",
+            "search_keyword": None,
+            "source_group": "domestic",
+            "account_id": str(account_id),
+        },
+    )
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["account_id"] == str(account_id)
 
 
 def test_list_sources_returns_created_source(tmp_path) -> None:
@@ -464,7 +512,8 @@ DELETE_SOURCE_HTML = """
 """.strip()
 
 
-def test_delete_source_after_successful_collection_still_works(tmp_path) -> None:
+def test_delete_source_after_successful_collection_still_works(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("APP_DEBUG", "true")
     html_path = Path(tmp_path) / 'topics.html'
     html_path.write_text(DELETE_SOURCE_HTML, encoding='utf-8')
     client = create_test_client(make_sqlite_url(tmp_path, 'delete-after-job.db'))

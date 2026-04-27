@@ -2,6 +2,7 @@
 param(
     [string]$ReleaseRoot = ('release\HotCollector-Offline-' + (Get-Date -Format 'yyyyMMdd-HHmmss')),
     [string]$DistRoot = 'dist\HotCollectorLauncher',
+    [string]$DesktopShellDistRoot = 'build\HotCollectorDesktopShell',
     [string]$PlaywrightBrowsersPath = '',
     [string]$VcRedistPath = '',
     [string]$VcRedistUrl = 'https://aka.ms/vs/17/release/vc_redist.x64.exe',
@@ -12,6 +13,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $BuildScript = Join-Path $PSScriptRoot 'build_package.ps1'
+$BuildDesktopShellScript = Join-Path $PSScriptRoot 'build_desktop_shell.ps1'
 $PrepareScript = Join-Path $PSScriptRoot 'prepare_release.ps1'
 $PackagingDir = Join-Path $ProjectRoot 'packaging'
 $PrereqCacheDir = Join-Path $PackagingDir 'prerequisites'
@@ -77,11 +79,15 @@ if (-not $PlaywrightBrowsersPath) {
     $PlaywrightBrowsersPath = Join-Path $ProjectRoot 'playwright-browsers'
 }
 
+if ($DryRun -or (-not $SkipBuild)) {
+    Invoke-Step -FilePath 'powershell.exe' -Arguments @('-ExecutionPolicy', 'Bypass', '-File', $BuildDesktopShellScript, '-OutputRoot', $DesktopShellDistRoot) -DisplayCommand "powershell.exe -ExecutionPolicy Bypass -File scripts\build_desktop_shell.ps1 -OutputRoot $DesktopShellDistRoot"
+}
+
 if (-not $SkipBuild) {
     Invoke-Step -FilePath 'powershell.exe' -Arguments @('-ExecutionPolicy', 'Bypass', '-File', $BuildScript) -DisplayCommand 'powershell.exe -ExecutionPolicy Bypass -File scripts\build_package.ps1'
 }
 
-Invoke-Step -FilePath 'powershell.exe' -Arguments @('-ExecutionPolicy', 'Bypass', '-File', $PrepareScript, '-ReleaseRoot', $ReleaseRoot, '-DistRoot', $DistRoot, '-PlaywrightBrowsersPath', $PlaywrightBrowsersPath) -DisplayCommand "powershell.exe -ExecutionPolicy Bypass -File scripts\prepare_release.ps1 -ReleaseRoot $ReleaseRoot -DistRoot $DistRoot -PlaywrightBrowsersPath $PlaywrightBrowsersPath"
+Invoke-Step -FilePath 'powershell.exe' -Arguments @('-ExecutionPolicy', 'Bypass', '-File', $PrepareScript, '-ReleaseRoot', $ReleaseRoot, '-DistRoot', $DistRoot, '-DesktopShellDistRoot', $DesktopShellDistRoot, '-PlaywrightBrowsersPath', $PlaywrightBrowsersPath) -DisplayCommand "powershell.exe -ExecutionPolicy Bypass -File scripts\prepare_release.ps1 -ReleaseRoot $ReleaseRoot -DistRoot $DistRoot -DesktopShellDistRoot $DesktopShellDistRoot -PlaywrightBrowsersPath $PlaywrightBrowsersPath"
 
 $resolvedVcRedist = $VcRedistPath
 if (-not $resolvedVcRedist) {

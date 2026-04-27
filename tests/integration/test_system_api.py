@@ -72,6 +72,7 @@ def test_system_desktop_manifest_exposes_shell_routes(tmp_path) -> None:
     assert payload["service"]["docs_url"] == "http://testserver/docs"
     assert any(item["href"] == "/content-center" for item in payload["navigation"])
     assert any(item["href"] == "/deliveries" for item in payload["navigation"])
+    assert any(item["href"] == "/auth-state" for item in payload["navigation"])
     assert payload["control"]["launch"]["kind"] == "launcher-start"
     assert payload["control"]["launch"]["launcher_path"].endswith("HotCollectorLauncher.exe")
     assert payload["control"]["launch"]["source_entry_path"].endswith("launcher.py")
@@ -176,6 +177,48 @@ def test_desktop_manifest_schema_file_matches_model_export() -> None:
     expected = DesktopManifest.model_json_schema()
     actual = json.loads(schema_path.read_text(encoding="utf-8"))
     assert actual == expected
+
+
+def test_system_auth_state_returns_bilibili_snapshot(tmp_path, monkeypatch) -> None:
+    from app.runtime_paths import get_runtime_paths
+
+    monkeypatch.setenv("HOT_RUNTIME_ROOT", str(tmp_path))
+    runtime_paths = get_runtime_paths(tmp_path)
+    runtime_paths.ensure_directories()
+    runtime_paths.env_file.write_text(
+        "BILIBILI_COOKIE=SESSDATA=test-sess; bili_jct=test-jct; DedeUserID=123\n",
+        encoding="utf-8",
+    )
+    runtime_paths.bilibili_user_data_dir.mkdir(parents=True, exist_ok=True)
+    runtime_paths.bilibili_storage_state_file.write_text(
+        '{"cookies":[],"origins":[]}',
+        encoding="utf-8",
+    )
+    client = create_test_client(make_sqlite_url(tmp_path))
+
+    response = client.get("/system/auth-state")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "ok"
+    assert payload["runtime_root"] == str(tmp_path)
+    assert "checked_at" in payload
+    assert len(payload["platforms"]) == 1
+    bilibili = payload["platforms"][0]
+    assert bilibili["platform"] == "bilibili"
+    assert bilibili["display_name"] == "B站"
+    assert bilibili["status"] == "ok"
+    assert "accounts" in bilibili
+    assert len(bilibili["accounts"]) == 1
+    account = bilibili["accounts"][0]
+    assert account["account_key"] == "default"
+    assert account["display_name"] == "默认账号"
+    assert account["is_default"] is True
+    assert account["cookie_configured"] is True
+    assert account["storage_state_exists"] is True
+    assert account["user_data_dir_exists"] is True
+    assert account["storage_state_file"] == str(runtime_paths.bilibili_storage_state_file)
+    assert account["user_data_dir"] == str(runtime_paths.bilibili_user_data_dir)
 
 
 def test_cancel_running_job_returns_no_running_when_idle(tmp_path) -> None:

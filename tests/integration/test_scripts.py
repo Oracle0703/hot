@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 BOOTSTRAP = ROOT / "scripts" / "bootstrap.ps1"
 RUN = ROOT / "scripts" / "run.ps1"
 BUILD = ROOT / "scripts" / "build_package.ps1"
+BUILD_DESKTOP_SHELL = ROOT / "scripts" / "build_desktop_shell.ps1"
 PREPARE = ROOT / "scripts" / "prepare_release.ps1"
 PREPARE_UPGRADE = ROOT / "scripts" / "prepare_upgrade_release.ps1"
 BUILD_OFFLINE = ROOT / "scripts" / "build_offline_release.ps1"
@@ -74,6 +75,8 @@ def test_prepare_release_script_renders_release_assembly_steps() -> None:
     assert result.returncode == 0
     assert "release\\HotCollector" in result.stdout
     assert "HotCollectorLauncher.exe" in result.stdout
+    assert "desktop-shell" in result.stdout
+    assert "打开桌面版.bat" in result.stdout
 
 
 def test_prepare_upgrade_release_script_renders_upgrade_assembly_steps() -> None:
@@ -82,6 +85,8 @@ def test_prepare_upgrade_release_script_renders_upgrade_assembly_steps() -> None
     assert result.returncode == 0
     assert "release\\HotCollector-Upgrade" in result.stdout
     assert "HotCollectorLauncher.exe" in result.stdout
+    assert "desktop-shell" in result.stdout
+    assert "打开桌面版.bat" in result.stdout
 
 
 def test_build_upgrade_release_script_prefers_tar_archive() -> None:
@@ -90,6 +95,29 @@ def test_build_upgrade_release_script_prefers_tar_archive() -> None:
     assert result.returncode == 0
     assert "tar.exe -a -cf" in result.stdout
     assert "prepare_upgrade_release.ps1" in result.stdout
+    assert "build_desktop_shell.ps1" in result.stdout
+
+
+def test_build_desktop_shell_script_renders_electron_assembly_steps() -> None:
+    result = run_ps1(BUILD_DESKTOP_SHELL, "-DryRun")
+
+    assert result.returncode == 0
+    assert "npm install" in result.stdout
+    assert "desktop-shell" in result.stdout
+    assert "electron.exe" in result.stdout
+    assert "tray.png" in result.stdout
+
+
+def test_desktop_shell_state_helpers_pass_node_tests() -> None:
+    result = subprocess.run(
+        ["node", "--test", str(ROOT / "desktop-shell" / "electron" / "shell-state.test.js")],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
 
 
 
@@ -97,14 +125,20 @@ def test_build_upgrade_release_script_prefers_tar_archive() -> None:
 def test_prepare_release_generates_stop_script_that_removes_pid_file() -> None:
     dist_root = ROOT / "tmp_test_prepare_release_dist"
     release_root = ROOT / "tmp_test_prepare_release_out"
+    desktop_shell_root = ROOT / "tmp_test_prepare_release_shell"
     try:
         if dist_root.exists():
             subprocess.run(["powershell", "-Command", f"Remove-Item -Recurse -Force '{dist_root}'"], check=False)
         if release_root.exists():
             subprocess.run(["powershell", "-Command", f"Remove-Item -Recurse -Force '{release_root}'"], check=False)
+        if desktop_shell_root.exists():
+            subprocess.run(["powershell", "-Command", f"Remove-Item -Recurse -Force '{desktop_shell_root}'"], check=False)
 
         dist_root.mkdir(parents=True, exist_ok=True)
+        (desktop_shell_root / "runtime").mkdir(parents=True, exist_ok=True)
         (dist_root / "HotCollectorLauncher.exe").write_text("stub", encoding="utf-8")
+        (desktop_shell_root / "launch-desktop-shell.bat").write_text("@echo off\r\necho desktop shell\r\n", encoding="utf-8")
+        (desktop_shell_root / "runtime" / "electron.exe").write_text("stub", encoding="utf-8")
 
         result = run_ps1(
             PREPARE,
@@ -112,32 +146,50 @@ def test_prepare_release_generates_stop_script_that_removes_pid_file() -> None:
             str(release_root.relative_to(ROOT)),
             "-DistRoot",
             str(dist_root.relative_to(ROOT)),
+            "-DesktopShellDistRoot",
+            str(desktop_shell_root.relative_to(ROOT)),
         )
 
         assert result.returncode == 0
         stop_script = (release_root / "停止系统.bat").read_text(encoding="utf-8")
         status_script = (release_root / "查看状态.bat").read_text(encoding="utf-8")
+        desktop_script = (release_root / "打开桌面版.bat").read_text(encoding="utf-8")
         assert "Remove-Item -Path $pidFile -Force" in stop_script
         assert "HotCollectorLauncher.exe --probe --print-json" in status_script
+        assert (release_root / "desktop-shell" / "launch-desktop-shell.bat").exists()
+        assert (release_root / "desktop-shell" / "runtime" / "electron.exe").exists()
+        assert (release_root / "outputs" / "weekly-covers").exists()
+        app_env = (release_root / "data" / "app.env").read_text(encoding="utf-8")
+        assert "WEEKLY_GRADE_PUSH_THRESHOLD=B+" in app_env
+        assert "WEEKLY_COVER_CACHE_RETENTION_DAYS=60" in app_env
+        assert "desktop-shell\\launch-desktop-shell.bat" in desktop_script
     finally:
         if dist_root.exists():
             subprocess.run(["powershell", "-Command", f"Remove-Item -Recurse -Force '{dist_root}'"], check=False)
         if release_root.exists():
             subprocess.run(["powershell", "-Command", f"Remove-Item -Recurse -Force '{release_root}'"], check=False)
+        if desktop_shell_root.exists():
+            subprocess.run(["powershell", "-Command", f"Remove-Item -Recurse -Force '{desktop_shell_root}'"], check=False)
 
 
 def test_prepare_upgrade_release_generates_program_only_package() -> None:
     dist_root = ROOT / "tmp_test_prepare_upgrade_dist"
     release_root = ROOT / "tmp_test_prepare_upgrade_out"
+    desktop_shell_root = ROOT / "tmp_test_prepare_upgrade_shell"
     try:
         if dist_root.exists():
             subprocess.run(["powershell", "-Command", f"Remove-Item -Recurse -Force '{dist_root}'"], check=False)
         if release_root.exists():
             subprocess.run(["powershell", "-Command", f"Remove-Item -Recurse -Force '{release_root}'"], check=False)
+        if desktop_shell_root.exists():
+            subprocess.run(["powershell", "-Command", f"Remove-Item -Recurse -Force '{desktop_shell_root}'"], check=False)
 
         (dist_root / "_internal").mkdir(parents=True, exist_ok=True)
+        (desktop_shell_root / "runtime").mkdir(parents=True, exist_ok=True)
         (dist_root / "HotCollectorLauncher.exe").write_text("stub", encoding="utf-8")
         (dist_root / "_internal" / "runtime.txt").write_text("stub", encoding="utf-8")
+        (desktop_shell_root / "launch-desktop-shell.bat").write_text("@echo off\r\necho desktop shell\r\n", encoding="utf-8")
+        (desktop_shell_root / "runtime" / "electron.exe").write_text("stub", encoding="utf-8")
 
         result = run_ps1(
             PREPARE_UPGRADE,
@@ -145,6 +197,8 @@ def test_prepare_upgrade_release_generates_program_only_package() -> None:
             str(release_root.relative_to(ROOT)),
             "-DistRoot",
             str(dist_root.relative_to(ROOT)),
+            "-DesktopShellDistRoot",
+            str(desktop_shell_root.relative_to(ROOT)),
         )
 
         assert result.returncode == 0
@@ -153,7 +207,9 @@ def test_prepare_upgrade_release_generates_program_only_package() -> None:
         assert (release_root / "启动系统.bat").exists()
         assert (release_root / "停止系统.bat").exists()
         assert (release_root / "查看状态.bat").exists()
+        assert (release_root / "打开桌面版.bat").exists()
         assert (release_root / "README-运营版.txt").exists()
+        assert (release_root / "desktop-shell" / "launch-desktop-shell.bat").exists()
         assert (release_root / "data").exists() is False
         assert (release_root / "logs").exists() is False
         assert (release_root / "outputs").exists() is False
@@ -163,19 +219,27 @@ def test_prepare_upgrade_release_generates_program_only_package() -> None:
             subprocess.run(["powershell", "-Command", f"Remove-Item -Recurse -Force '{dist_root}'"], check=False)
         if release_root.exists():
             subprocess.run(["powershell", "-Command", f"Remove-Item -Recurse -Force '{release_root}'"], check=False)
+        if desktop_shell_root.exists():
+            subprocess.run(["powershell", "-Command", f"Remove-Item -Recurse -Force '{desktop_shell_root}'"], check=False)
 
 
 def test_prepare_release_generates_stop_script_without_using_reserved_pid_variable() -> None:
     dist_root = ROOT / "tmp_test_prepare_release_dist_reserved"
     release_root = ROOT / "tmp_test_prepare_release_out_reserved"
+    desktop_shell_root = ROOT / "tmp_test_prepare_release_shell_reserved"
     try:
         if dist_root.exists():
             subprocess.run(["powershell", "-Command", f"Remove-Item -Recurse -Force '{dist_root}'"], check=False)
         if release_root.exists():
             subprocess.run(["powershell", "-Command", f"Remove-Item -Recurse -Force '{release_root}'"], check=False)
+        if desktop_shell_root.exists():
+            subprocess.run(["powershell", "-Command", f"Remove-Item -Recurse -Force '{desktop_shell_root}'"], check=False)
 
         dist_root.mkdir(parents=True, exist_ok=True)
+        (desktop_shell_root / "runtime").mkdir(parents=True, exist_ok=True)
         (dist_root / "HotCollectorLauncher.exe").write_text("stub", encoding="utf-8")
+        (desktop_shell_root / "launch-desktop-shell.bat").write_text("@echo off\r\necho desktop shell\r\n", encoding="utf-8")
+        (desktop_shell_root / "runtime" / "electron.exe").write_text("stub", encoding="utf-8")
 
         result = run_ps1(
             PREPARE,
@@ -183,6 +247,8 @@ def test_prepare_release_generates_stop_script_without_using_reserved_pid_variab
             str(release_root.relative_to(ROOT)),
             "-DistRoot",
             str(dist_root.relative_to(ROOT)),
+            "-DesktopShellDistRoot",
+            str(desktop_shell_root.relative_to(ROOT)),
         )
 
         assert result.returncode == 0
@@ -194,20 +260,28 @@ def test_prepare_release_generates_stop_script_without_using_reserved_pid_variab
             subprocess.run(["powershell", "-Command", f"Remove-Item -Recurse -Force '{dist_root}'"], check=False)
         if release_root.exists():
             subprocess.run(["powershell", "-Command", f"Remove-Item -Recurse -Force '{release_root}'"], check=False)
+        if desktop_shell_root.exists():
+            subprocess.run(["powershell", "-Command", f"Remove-Item -Recurse -Force '{desktop_shell_root}'"], check=False)
 
 
 def test_prepare_upgrade_release_generates_status_script_with_probe_command() -> None:
     dist_root = ROOT / "tmp_test_prepare_upgrade_dist_status"
     release_root = ROOT / "tmp_test_prepare_upgrade_out_status"
+    desktop_shell_root = ROOT / "tmp_test_prepare_upgrade_shell_status"
     try:
         if dist_root.exists():
             subprocess.run(["powershell", "-Command", f"Remove-Item -Recurse -Force '{dist_root}'"], check=False)
         if release_root.exists():
             subprocess.run(["powershell", "-Command", f"Remove-Item -Recurse -Force '{release_root}'"], check=False)
+        if desktop_shell_root.exists():
+            subprocess.run(["powershell", "-Command", f"Remove-Item -Recurse -Force '{desktop_shell_root}'"], check=False)
 
         (dist_root / "_internal").mkdir(parents=True, exist_ok=True)
+        (desktop_shell_root / "runtime").mkdir(parents=True, exist_ok=True)
         (dist_root / "HotCollectorLauncher.exe").write_text("stub", encoding="utf-8")
         (dist_root / "_internal" / "runtime.txt").write_text("stub", encoding="utf-8")
+        (desktop_shell_root / "launch-desktop-shell.bat").write_text("@echo off\r\necho desktop shell\r\n", encoding="utf-8")
+        (desktop_shell_root / "runtime" / "electron.exe").write_text("stub", encoding="utf-8")
 
         result = run_ps1(
             PREPARE_UPGRADE,
@@ -215,6 +289,8 @@ def test_prepare_upgrade_release_generates_status_script_with_probe_command() ->
             str(release_root.relative_to(ROOT)),
             "-DistRoot",
             str(dist_root.relative_to(ROOT)),
+            "-DesktopShellDistRoot",
+            str(desktop_shell_root.relative_to(ROOT)),
         )
 
         assert result.returncode == 0
@@ -225,6 +301,8 @@ def test_prepare_upgrade_release_generates_status_script_with_probe_command() ->
             subprocess.run(["powershell", "-Command", f"Remove-Item -Recurse -Force '{dist_root}'"], check=False)
         if release_root.exists():
             subprocess.run(["powershell", "-Command", f"Remove-Item -Recurse -Force '{release_root}'"], check=False)
+        if desktop_shell_root.exists():
+            subprocess.run(["powershell", "-Command", f"Remove-Item -Recurse -Force '{desktop_shell_root}'"], check=False)
 
 
 def test_build_offline_release_script_prefers_tar_archive() -> None:
@@ -233,6 +311,7 @@ def test_build_offline_release_script_prefers_tar_archive() -> None:
     assert result.returncode == 0
     assert "tar.exe -a -cf" in result.stdout
     assert "Compress-Archive" not in result.stdout
+    assert "build_desktop_shell.ps1" in result.stdout
 
 
 def test_build_offline_release_generates_sha256_file(tmp_path) -> None:
@@ -240,11 +319,12 @@ def test_build_offline_release_generates_sha256_file(tmp_path) -> None:
     dist_root = ROOT / "tmp_test_build_offline_dist" / "HotCollectorLauncher"
     release_root = ROOT / "tmp_test_build_offline_release" / "HotCollector-Offline-Test"
     playwright_root = ROOT / "tmp_test_build_offline_playwright"
+    desktop_shell_root = ROOT / "tmp_test_build_offline_shell"
     vc_redist = ROOT / "tmp_test_build_offline_vcredist.exe"
     zip_path = Path(str(release_root) + ".zip")
     sha_path = Path(str(zip_path) + ".sha256")
     try:
-        for path in (dist_root.parent, release_root.parent, playwright_root):
+        for path in (dist_root.parent, release_root.parent, playwright_root, desktop_shell_root):
             if path.exists():
                 subprocess.run(["powershell", "-Command", f"Remove-Item -Recurse -Force '{path}'"], check=False)
         for path in (vc_redist, zip_path, sha_path):
@@ -253,8 +333,11 @@ def test_build_offline_release_generates_sha256_file(tmp_path) -> None:
 
         dist_root.mkdir(parents=True, exist_ok=True)
         playwright_root.mkdir(parents=True, exist_ok=True)
+        (desktop_shell_root / "runtime").mkdir(parents=True, exist_ok=True)
         (dist_root / "HotCollectorLauncher.exe").write_text("stub", encoding="utf-8")
         (playwright_root / "browser.txt").write_text("stub", encoding="utf-8")
+        (desktop_shell_root / "launch-desktop-shell.bat").write_text("@echo off\r\necho desktop shell\r\n", encoding="utf-8")
+        (desktop_shell_root / "runtime" / "electron.exe").write_text("stub", encoding="utf-8")
         vc_redist.write_text("stub", encoding="utf-8")
 
         result = run_ps1(
@@ -266,6 +349,8 @@ def test_build_offline_release_generates_sha256_file(tmp_path) -> None:
             str(dist_root.relative_to(ROOT)),
             "-PlaywrightBrowsersPath",
             str(playwright_root),
+            "-DesktopShellDistRoot",
+            str(desktop_shell_root.relative_to(ROOT)),
             "-VcRedistPath",
             str(vc_redist),
         )
@@ -285,7 +370,7 @@ def test_build_offline_release_generates_sha256_file(tmp_path) -> None:
         expected = f"{file_hash.stdout.strip()}  {zip_path.name}"
         assert sha_line == expected
     finally:
-        for path in (dist_root.parent, release_root.parent, playwright_root):
+        for path in (dist_root.parent, release_root.parent, playwright_root, desktop_shell_root):
             if path.exists():
                 subprocess.run(["powershell", "-Command", f"Remove-Item -Recurse -Force '{path}'"], check=False)
         for path in (vc_redist, zip_path, sha_path):

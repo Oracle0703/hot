@@ -7,6 +7,7 @@ from app.models.raw_item import RawItem
 from app.models.report import Report
 from app.models.schedule_plan import SchedulePlan
 from app.models.scheduler_setting import SchedulerSetting
+from app.models.site_account import SiteAccount
 from app.models.subscription import Subscription
 from app.models.source import Source
 
@@ -20,6 +21,7 @@ __all__ = [
     "Report",
     "SchedulePlan",
     "SchedulerSetting",
+    "SiteAccount",
     "Subscription",
     "Source",
 ]

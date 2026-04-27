@@ -96,6 +96,7 @@ def _render_weekly_action_bar(threshold_grade: str) -> str:
       <div class='weekly-threshold-banner'>
         <strong>当前推送阈值：{escape(threshold_grade)}</strong>
         <span>推荐评分仅供参考；人工评分达到该等级及以上时，点击“批量推送达标项”才会发到钉钉群。</span>
+        <span>如需调整阈值或封面缓存策略，可前往 <a href='/config?return_to=weekly'>配置中心</a> 修改 <code>WEEKLY_GRADE_PUSH_THRESHOLD</code> / <code>WEEKLY_COVER_CACHE_RETENTION_DAYS</code>。</span>
       </div>
       <div class='weekly-bulk-tools'>
         <label class='weekly-bulk-label' for='weekly-bulk-grade'>批量设为</label>
@@ -118,8 +119,15 @@ def _render_weekly_feedback(
     ratings_saved: bool,
     pushed_count: int | None,
     push_empty: bool,
+    config_updated: bool,
+    threshold_grade: str,
+    cover_retention_days: int,
 ) -> str:
     messages: list[str] = []
+    if config_updated:
+        messages.append(
+            f"<p class='helper-note'>周榜配置已更新。当前推送阈值为 {escape(threshold_grade)}，封面缓存保留 {escape(str(cover_retention_days))} 天。</p>"
+        )
     if ratings_saved:
         messages.append("<p class='helper-note'>评分已保存。</p>")
     if pushed_count is not None:
@@ -264,7 +272,9 @@ def weekly_page(request: Request, session: Session = Depends(get_db_session)) ->
     pushed_count = int(pushed_count_param) if pushed_count_param and pushed_count_param.isdigit() else None
     ratings_saved = request.query_params.get("ratings_saved") == "1"
     push_empty = request.query_params.get("push_empty") == "1"
+    config_updated = request.query_params.get("config_updated") == "1"
     threshold_grade = rating_service.normalize_grade(settings.weekly_grade_push_threshold) or "B+"
+    cover_retention_days = int(max(int(settings.weekly_cover_cache_retention_days or 60), 1))
     content = (
         render_page_header(
             eyebrow='Weekly',
@@ -274,7 +284,14 @@ def weekly_page(request: Request, session: Session = Depends(get_db_session)) ->
         )
         + render_panel(
             WEEKLY_TITLE,
-            _render_weekly_feedback(ratings_saved=ratings_saved, pushed_count=pushed_count, push_empty=push_empty)
+            _render_weekly_feedback(
+                ratings_saved=ratings_saved,
+                pushed_count=pushed_count,
+                push_empty=push_empty,
+                config_updated=config_updated,
+                threshold_grade=threshold_grade,
+                cover_retention_days=cover_retention_days,
+            )
             + "<div class='helper-note'>仅展示最近 7 天首次抓到的内容；无封面时会显示占位文案。</div>"
             + "<form method='post' action='/weekly/push' class='weekly-push-form'><div class='page-actions'><button class='button-secondary' type='submit'>批量推送达标项</button></div></form>"
             + _render_weekly_table(items, threshold_grade=threshold_grade)

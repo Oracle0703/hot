@@ -67,6 +67,7 @@ class DingTalkEnvSettings:
 
 @dataclass(slots=True)
 class BilibiliEnvSettings:
+    account_key: str
     cookie: str
     env_file: Path
 
@@ -116,21 +117,27 @@ class AppEnvService:
         os.environ['DINGTALK_KEYWORD'] = values['DINGTALK_KEYWORD']
         return self.get_dingtalk_settings()
 
-    def get_bilibili_settings(self) -> BilibiliEnvSettings:
+    def get_bilibili_settings(self, account_key: str = 'default') -> BilibiliEnvSettings:
         values = self._load_values()
         settings = get_settings()
+        env_key = self._bilibili_cookie_env_key(account_key)
+        fallback_cookie = settings.bilibili_cookie if env_key == 'BILIBILI_COOKIE' else ''
         return BilibiliEnvSettings(
-            cookie=values.get('BILIBILI_COOKIE', settings.bilibili_cookie),
+            account_key=self._normalize_account_key(account_key),
+            cookie=values.get(env_key, fallback_cookie),
             env_file=self.env_file,
         )
 
-    def update_bilibili_settings(self, cookie: str) -> BilibiliEnvSettings:
+    def update_bilibili_settings(self, cookie: str, account_key: str = 'default') -> BilibiliEnvSettings:
         values = self._load_values()
-        values['BILIBILI_COOKIE'] = self._normalize_bilibili_cookie(cookie)
+        env_key = self._bilibili_cookie_env_key(account_key)
+        values[env_key] = self._normalize_bilibili_cookie(cookie)
         self._write_values(values)
 
-        os.environ['BILIBILI_COOKIE'] = values['BILIBILI_COOKIE']
-        return self.get_bilibili_settings()
+        os.environ[env_key] = values[env_key]
+        if env_key == 'BILIBILI_COOKIE':
+            os.environ['BILIBILI_COOKIE'] = values[env_key]
+        return self.get_bilibili_settings(account_key=account_key)
 
     def get_network_settings(self) -> NetworkEnvSettings:
         values = self._load_values()
@@ -207,7 +214,7 @@ class AppEnvService:
             key, value = stripped.split('=', 1)
             key = key.strip()
             value = value.strip()
-            if key in SENSITIVE_KEYS and value.startswith(_ENC_PREFIX):
+            if self._is_sensitive_key(key) and value.startswith(_ENC_PREFIX):
                 # 启用加密时还原明文;如果 key 已丢失,
                 # ``decrypt_text`` 会透传原值并保证向后兼容。
                 value = config_encryption.decrypt_text(value[len(_ENC_PREFIX):])
@@ -222,7 +229,7 @@ class AppEnvService:
         for key, raw_value in values.items():
             if (
                 encryption_enabled
-                and key in SENSITIVE_KEYS
+                and self._is_sensitive_key(key)
                 and raw_value
                 and not raw_value.startswith(_ENC_PREFIX)
             ):
@@ -291,3 +298,20 @@ class AppEnvService:
         if 'SESSDATA=' not in normalized:
             raise ValueError('Cookie 缺少 SESSDATA，系统未保存')
         return normalized
+
+    def _bilibili_cookie_env_key(self, account_key: str) -> str:
+        normalized = self._normalize_account_key(account_key)
+        if normalized == 'default':
+            return 'BILIBILI_COOKIE'
+        suffix = normalized.replace('-', '_').upper()
+        return f'BILIBILI_COOKIE__{suffix}'
+
+    @staticmethod
+    def _normalize_account_key(account_key: str) -> str:
+        normalized = re.sub(r'[^a-z0-9-]+', '-', str(account_key or '').strip().lower())
+        normalized = re.sub(r'-{2,}', '-', normalized).strip('-')
+        return normalized or 'default'
+
+    @staticmethod
+    def _is_sensitive_key(key: str) -> bool:
+        return key in SENSITIVE_KEYS or key.startswith('BILIBILI_COOKIE__')

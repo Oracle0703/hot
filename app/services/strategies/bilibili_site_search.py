@@ -64,7 +64,11 @@ class BilibiliSiteSearchStrategy:
 
 class _PlaywrightBilibiliRunner:
     def search(self, source, query: str) -> list[dict[str, object]]:
-        return run_awaitable_sync(self._search(query))
+        self._current_source = source
+        try:
+            return run_awaitable_sync(self._search(query))
+        finally:
+            self._current_source = None
 
     async def _search(self, query: str) -> list[dict[str, object]]:
         try:
@@ -73,7 +77,7 @@ class _PlaywrightBilibiliRunner:
             raise RuntimeError("playwright is not installed") from exc
 
         search_url = f"https://search.bilibili.com/all?keyword={quote(query)}"
-        cookies = _get_optional_bilibili_cookies()
+        cookies = _get_optional_bilibili_cookies(getattr(self, "_current_source", None))
         cookie_names = [cookie["name"] for cookie in cookies]
         logger.info(
             "bilibili search start: query=%s cookie_loaded=%s cookie_names=%s",
@@ -153,8 +157,10 @@ def _extract_bilibili_items(html: str) -> list[dict[str, object]]:
     return items
 
 
-def _get_optional_bilibili_cookies() -> list[dict[str, object]]:
-    cookie_value = get_settings().bilibili_cookie.strip()
+def _get_optional_bilibili_cookies(source=None) -> list[dict[str, object]]:
+    cookie_value = str(getattr(source, "account_cookie", "") or "").strip()
+    if not cookie_value:
+        cookie_value = get_settings().bilibili_cookie.strip()
     if not cookie_value:
         return []
 

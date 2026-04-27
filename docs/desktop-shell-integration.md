@@ -2,6 +2,25 @@
 
 本文档面向 Electron、Tauri、WinUI 等本地壳层，说明如何消费热点采集系统当前暴露的桌面壳契约。
 
+## 当前仓库已落地的最小壳体
+
+| 项目 | 现状 |
+| --- | --- |
+| 实体壳体 | 已提供 `desktop-shell/electron/` 最小 Electron 壳体 |
+| 构建脚本 | `scripts/build_desktop_shell.ps1` 会组装 `build/HotCollectorDesktopShell/` |
+| 发布入口 | `prepare_release.ps1` / `build_offline_release.ps1` / `build_upgrade_release.ps1` 会把壳体复制到 release，并生成 `打开桌面版.bat` |
+| 生命周期 | 壳体本身不接管 Python 内核，只负责探测/拉起本地服务、托盘常驻、状态轮询与加载 `desktop-manifest` |
+
+## 当前壳体增强能力
+
+| 项目 | 现状 |
+| --- | --- |
+| 托盘 | 已支持常驻托盘图标、恢复主界面、打开账号态页、启动/停止服务、手动刷新状态 |
+| 关闭行为 | 点击窗口关闭按钮时默认隐藏到托盘，不直接退出 |
+| 通知 | 已基于 `probe`、`/system/auth-state`、`/system/health/extended` 做系统通知与去重 |
+| 多账号兼容 | 当前继续消费 `/system/auth-state.status` 顶层聚合状态，不要求桌面壳立即理解账号子列表 |
+| 状态源 | 仍完全复用现有 Python 控制面与 HTTP 接口，不新增私有 IPC |
+
 ## 接入目标
 
 | 目标 | 说明 |
@@ -120,4 +139,4 @@ else:
 | 多实例管理 | 目前 manifest 面向单实例本地运行，不提供实例列表 |
 | 参数自定义 | 当前只暴露推荐参数，不暴露完整 CLI 参数矩阵 |
 | 壳层事件回调 | 当前无专门 IPC/事件流，壳层需自行轮询 `probe` 或 `health` |
-| 进程托管 | 当前仍由脚本/launcher 管理，不由桌面壳接管生命周期 |
+| 进程托管 | 当前仍由脚本/launcher 管理，Electron 仅做最小窗口壳层 |

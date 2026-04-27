@@ -57,15 +57,20 @@
 
 | 模块 | 状态 | 说明 |
 | --- | --- | --- |
-| Web 页面 | 已完成 | 首页、采集源管理、任务详情、报告列表/详情、定时调度页可用 |
+| Web 页面 | 已完成 | 首页、采集源管理、任务详情、报告列表/详情、周榜页、定时调度页可用 |
 | 采集源 CRUD | 已完成 | 支持 API 和表单两种入口 |
 | 采集执行 | 已完成 | 支持手动触发和后台异步执行 |
 | 调度能力 | 已完成 | 内置轻量轮询器，每天按配置时间创建 `scheduled` 任务 |
 | 报告生成 | 已完成 | 自动生成 Markdown 和 DOCX 两种格式 |
 | 内容中心 | 已完成 | 已落地 `RawItem -> ContentItem` 内容流水线，并提供 `/content-center` 与 `/api/content` |
 | 订阅中心 | 已完成 | 已落地 `Subscription -> DeliveryRecord` 分发链路，并提供 `/subscriptions` 与 `/api/subscriptions` |
+| 账号态状态页 | 已完成 | 已提供 `/auth-state` 与 `/system/auth-state`，用于多账号登录态巡检 |
+| 周榜评分/推送 | 已完成 | 已提供 `/weekly`、人工评分保存、推荐评分展示与批量钉钉推送 |
+| 多账号体系 | 已完成（B站首版） | 已支持 B站账号槽位、来源绑定账号执行、默认账号回退与多账号状态页 |
 | 数据库 | 已完成 | 默认 SQLite，本地免安装；可切换 MySQL |
 | 启动器 | 已完成 | 已提供 `launcher.py`、PyInstaller spec、发布组装脚本 |
+| 桌面壳 | 已完成 | 已提供 Electron 最小壳体，并纳入 release / 离线包 / 升级包 |
+| 托盘/系统通知 | 已完成 | Electron 壳体已支持托盘常驻、关闭窗口最小化到托盘、状态轮询与系统通知 |
 | 启动脚本 | 已完成 | 已提供 `bootstrap.ps1`、`run.ps1`、`build_package.ps1`、`prepare_release.ps1` |
 | 测试覆盖 | 已完成 | 单元、集成、脚本 dry-run 回归已覆盖 |
 
@@ -100,6 +105,7 @@
 | `scripts/bootstrap.ps1` | 初始化虚拟环境、依赖和目录 |
 | `scripts/run.ps1` | 启动开发服务 |
 | `scripts/build_package.ps1` | 执行 PyInstaller 打包 |
+| `scripts/build_desktop_shell.ps1` | 构建 Electron 最小桌面壳运行目录 |
 | `scripts/prepare_release.ps1` | 组装最终发布目录 |
 | `scripts/build_offline_release.ps1` | 一键生成完整离线发布包和 zip |
 | `scripts/prepare_upgrade_release.ps1` | 组装仅包含程序文件的覆盖升级包目录 |
@@ -122,8 +128,12 @@
 | --- | --- | --- |
 | 内容中心页面 | `/content-center` | 查看 `ContentItem` 列表，作为共享内容视图的最小入口 |
 | 订阅中心页面 | `/subscriptions` | 查看当前订阅规则，作为分发配置入口 |
+| 账号态状态页 | `/auth-state` | 查看 B站多账号登录态快照、storage state 与本地浏览器目录状态 |
+| 周榜页 | `/weekly` | 查看最近 7 天热点、维护人工评分并批量推送达标项 |
 | 内容 API | `/api/content` | 返回内容中心中的归一化内容列表 |
 | 订阅 API | `/api/subscriptions` | 支持订阅规则创建与查询 |
+| 账号态 API | `/system/auth-state` | 返回多账号账号态快照，供页面与桌面壳复用 |
+| 账号管理 API | `/api/site-accounts` | 管理 B站账号槽位、默认账号与来源绑定候选列表 |
 | 桌面壳适配接口 | `/system/desktop-manifest` | 为后续 Electron / Tauri 壳层提供稳定导航与本地运行时入口清单 |
 | 内容流水线 | `RawItem -> ContentItem` | `ReportService` 生成报告前会先写入原始内容并归一化去重 |
 | 分发流水线 | `Subscription -> DeliveryRecord` | `ContentDispatchService` 负责匹配订阅、投递并记录去重结果 |
@@ -222,6 +232,8 @@
 | `SOURCE_FETCH_INTERVAL_SECONDS` | `0` | 不同采集源之间的基础等待秒数 |
 | `BILIBILI_SOURCE_INTERVAL_SECONDS` | `0` | B站采集源额外等待秒数 |
 | `BILIBILI_RETRY_DELAY_SECONDS` | `5` | B站页面/API 重试等待秒数 |
+| `WEEKLY_GRADE_PUSH_THRESHOLD` | `B+` | `/weekly` 批量推送时的人工评分阈值，支持 `S/A+/A/B+/B/C/D` |
+| `WEEKLY_COVER_CACHE_RETENTION_DAYS` | `60` | 周榜封面本地缓存保留天数，后台任务会按该值清理旧文件 |
 
 可复制 `.env.example` 为本地环境变量模板。
 
@@ -310,6 +322,7 @@ python .\scripts\dingtalk_print_open_conversation_id.py --client-id "你的Clien
 | 输出目录 | `release\HotCollector-Offline-时间戳\` |
 | 输出压缩包 | `release\HotCollector-Offline-时间戳.zip` |
 | 包含内容 | 程序文件、启动/停止脚本、默认 `data\app.env`、运行库、浏览器目录、运营说明 |
+| 桌面壳 | 同时包含 `desktop-shell\` 与 `打开桌面版.bat` |
 | 适用场景 | 给一台固定电脑做首次完整部署 |
 | Git 状态 | `release/` 已被 `.gitignore` 忽略，生成后无需提交 |
 
@@ -346,8 +359,11 @@ python .\scripts\dingtalk_print_open_conversation_id.py --client-id "你的Clien
 | --- | --- |
 | `release\HotCollector\HotCollectorLauncher.exe` | 启动器主程序 |
 | `release\HotCollector\启动系统.bat` | 给运营双击启动 |
+| `release\HotCollector\打开桌面版.bat` | 通过 Electron 壳体打开桌面版 |
 | `release\HotCollector\停止系统.bat` | 给运营关闭系统 |
 | `release\HotCollector\查看状态.bat` | 输出当前本地实例状态 JSON |
+| `release\HotCollector\desktop-shell\` | Electron 最小桌面壳运行目录 |
+| `release\HotCollector\desktop-shell\assets\tray.png` | 托盘图标资源 |
 | `release\HotCollector\data\` | SQLite 数据和本地配置 |
 | `release\HotCollector\logs\` | 启动日志 |
 | `release\HotCollector\outputs\reports\` | 报告输出 |
@@ -378,7 +394,9 @@ python .\scripts\dingtalk_print_open_conversation_id.py --client-id "你的Clien
 | --- | --- |
 | 1 | 把 `release\HotCollector\` 整个目录复制到固定电脑 |
 | 2 | 双击 `启动系统.bat` 或 `HotCollectorLauncher.exe` |
-| 3 | 稍等几秒，浏览器会自动打开 `http://127.0.0.1:38080/` |
+| 2.1 | 如需桌面壳窗口，可双击 `打开桌面版.bat` |
+| 2.2 | 点击窗口关闭按钮时，程序会隐藏到托盘；可从托盘恢复主界面或打开账号态页 |
+| 3 | 稍等几秒，浏览器会自动打开 `http://127.0.0.1:38080/`，托盘会持续反映运行状态 |
 | 4 | 在页面里维护采集源、执行任务、下载报告 |
 | 5 | 关闭时双击 `停止系统.bat` |
 | 6 | 如需确认实例状态，可在命令行执行 `查看状态.bat` |
@@ -392,10 +410,11 @@ python .\scripts\dingtalk_print_open_conversation_id.py --client-id "你的Clien
 | 3 | 在首页 `/` 点击“立即采集”创建手动任务 |
 | 4 | 跳转到任务详情页，查看成功数、失败数和日志 |
 | 5 | 任务完成后进入 `/reports` 或任务详情页下载 Markdown / DOCX 报告 |
-| 6 | 如需查看归一化后的共享内容，进入 `/content-center` 或调用 `/api/content` |
-| 7 | 如需配置内容订阅，进入 `/subscriptions` 或调用 `/api/subscriptions` 创建规则 |
-| 8 | 如需每天自动执行，在 `/scheduler` 中启用并配置执行时间 |
-| 9 | 如需群通知，配置 `ENABLE_DINGTALK_NOTIFIER=true` 与钉钉 Webhook 相关环境变量，任务完成后会自动发送摘要消息 |
+| 6 | 如需做最近 7 天热点人工筛选，进入 `/weekly` 查看推荐评分、保存人工评分并批量推送达标项 |
+| 7 | 如需查看归一化后的共享内容，进入 `/content-center` 或调用 `/api/content` |
+| 8 | 如需配置内容订阅，进入 `/subscriptions` 或调用 `/api/subscriptions` 创建规则 |
+| 9 | 如需每天自动执行，在 `/scheduler` 中启用并配置执行时间 |
+| 10 | 如需群通知，配置 `ENABLE_DINGTALK_NOTIFIER=true` 与钉钉 Webhook 相关环境变量，任务完成后会自动发送摘要消息 |
 
 如需先验证钉钉机器人是否可用，可单独发送一条测试消息：
 
@@ -428,6 +447,17 @@ python .\scripts\send_dingtalk_test_message.py  # 会自动读取 data\app.env
 | 文件格式 | `.md`、`.docx` |
 | 页面入口 | `/reports`、`/reports/{id}` |
 | 下载接口 | `/api/reports/{id}/download?format=md|docx` |
+
+## 周榜评分与批量推送
+
+| 项目 | 说明 |
+| --- | --- |
+| 页面入口 | `/weekly` |
+| 数据范围 | 最近 7 天首次抓到的 `CollectedItem` |
+| 页面能力 | 展示推荐评分、保存人工评分、显示推送状态 |
+| 推送动作 | 点击“批量推送达标项”后，把人工评分达到 `WEEKLY_GRADE_PUSH_THRESHOLD` 且未推送的内容合并成 1 条钉钉 markdown |
+| 去重规则 | 已写入 `pushed_to_dingtalk_at` 的内容不会重复进入下一次批量推送 |
+| 封面策略 | 页面通过 `/weekly/covers/{item_id}` 读取本地缓存，避免直接暴露原始外链 |
 
 ## 测试
 
@@ -463,11 +493,8 @@ python -m pytest tests\unit\test_alembic_migrations.py tests\integration\test_co
 
 | 优先级 | 建议 |
 | --- | --- |
-| P1 | 实现真正的 Electron / Tauri 桌面壳，消费 `desktop-manifest`、schema 与本地控制面 |
-| P1 | 增加独立账号态状态页，把登录态、失效提示和巡检结果集中展示 |
 | P1 | 补充真实站点规则示例、导入脚本和更贴近运营场景的初始化样例 |
-| P2 | 增加托盘、系统通知和安装器，提升固定电脑场景的可运维性 |
-| P2 | 在单用户内核稳定前提下，评估多账号体系和更强单实例托管 |
+| P2 | 在当前 B站首版多账号稳定前提下，按需扩展到更多平台和更强单实例托管 |
 | P3 | 增加 AI 摘要、热点排序和更复杂的消息编排 |
 
 ## 报告快捷操作

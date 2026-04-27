@@ -72,6 +72,62 @@
 | `control.probe` | object | 本地状态探测入口，包含 `script_path`、`release_bat_path`、`preferred_path`、`launch_mode`、`preferred_args`、`default_args` |
 | `control.stop` | object | 本地停止入口，包含 `script_path`、`release_bat_path`、`preferred_path`、`launch_mode`、`preferred_args`、`default_args` |
 
+### `GET /system/auth-state`
+
+返回当前多账号账号态快照。首版只覆盖 B站登录态，用于 `/auth-state` 页面与桌面壳状态展示。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `status` | string | 总状态：`ok` / `warning` / `missing` / `error` |
+| `runtime_root` | string | 当前运行根目录 |
+| `checked_at` | string | 本次快照生成时间 |
+| `platforms[]` | array | 平台状态列表，首版只有一个 `bilibili` |
+
+平台对象字段：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `platform` | string | 平台标识，首版固定 `bilibili` |
+| `display_name` | string | 展示名，首版固定 `B站` |
+| `status` | string | 平台聚合状态 |
+| `action_hint` | string | 当前平台优先建议动作 |
+| `issues` | array | 当前平台聚合问题列表 |
+| `accounts[]` | array | 账号列表，至少包含默认账号快照 |
+
+账号对象字段：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `account_id` | string/null | 账号主键；默认兼容账号可能为空 |
+| `account_key` | string | 账号稳定键，如 `default`、`creator-a` |
+| `display_name` | string | 展示名 |
+| `enabled` | bool | 是否启用 |
+| `is_default` | bool | 是否默认账号 |
+| `status` | string | 账号状态 |
+| `cookie_configured` | bool | 当前账号 Cookie 是否已配置 |
+| `storage_state_exists` | bool | 当前账号 storage state 是否存在 |
+| `user_data_dir_exists` | bool | 当前账号 user-data 目录是否存在 |
+| `storage_state_file` | string | 当前账号 storage state 文件路径 |
+| `user_data_dir` | string | 当前账号浏览器用户目录路径 |
+| `action_hint` | string | 建议动作 |
+| `issues` | array | 当前账号问题列表 |
+
+### `GET /api/site-accounts`
+
+返回账号列表，支持 `?platform=bilibili` 过滤。
+
+### `POST /api/site-accounts`
+
+创建账号槽位。请求体字段：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `platform` | string | 首版固定 `bilibili` |
+| `account_key` | string | 账号稳定键，会规范化为小写短横线形式 |
+| `display_name` | string | 展示名 |
+| `enabled` | bool | 是否启用 |
+| `is_default` | bool | 是否设为默认账号 |
+
 ### `POST /system/jobs/cancel-running`
 
 | 入参    | 类型         | 说明                                    |
@@ -84,6 +140,57 @@
 
 返回 yaml 文本（`Content-Type: text/yaml`）。`mask=false` 仅在 DEBUG 模式可用，且会记录审计日志。
 
-## 采集源、任务、报告
+## 报告与周榜（Reports / Weekly）
 
-详见 `app/api/routes_sources.py`、`routes_jobs.py`、`routes_reports.py` 与 [../specs/20-collection-strategies.md](20-collection-strategies.md)。本节随阶段 3 落地后补全。
+### `GET /api/reports`
+
+返回当前历史报告列表。
+
+### `GET /api/reports/{report_id}/download?format=md|docx`
+
+下载指定报告文件。
+
+| 查询参数 | 类型 | 说明 |
+| --- | --- | --- |
+| `format` | string | `md` 或 `docx`，默认 `md` |
+
+### `GET /weekly`
+
+返回最近 7 天热点周榜页面。
+
+| 页面能力 | 说明 |
+| --- | --- |
+| 数据范围 | 仅展示最近 7 天首次抓到的内容 |
+| 排序 | 优先按发布时间倒序；缺失时降级按首次采集时间 |
+| 扩展信息 | 页面会同步展示推荐评分、人工评分控件与推送状态 |
+| 封面读取 | 页面中的封面图片统一走 `/weekly/covers/{item_id}` 本地缓存入口 |
+
+### `POST /weekly/ratings`
+
+保存当前周榜页上的人工评分选择。
+
+| 请求体 | 类型 | 说明 |
+| --- | --- | --- |
+| `grade_{item_id}` | form field | 每条内容的人工评分；空值表示清空 |
+
+成功后返回 `303`，重定向到 `/weekly?ratings_saved=1`。
+
+### `POST /weekly/push`
+
+批量推送当前最近 7 天窗口内、达到阈值且尚未推送的内容到钉钉。
+
+| 行为 | 说明 |
+| --- | --- |
+| 推荐评分刷新 | 推送前会先刷新当前窗口内条目的推荐评分并持久化 |
+| 阈值来源 | `WEEKLY_GRADE_PUSH_THRESHOLD` |
+| 去重规则 | 已写入 `pushed_to_dingtalk_at` 的内容不会重复推送 |
+| 成功跳转 | `303 -> /weekly?pushed_count={n}` |
+| 空结果跳转 | `303 -> /weekly?push_empty=1` |
+
+### `GET /weekly/covers/{item_id}`
+
+返回指定条目的本地封面缓存文件；找不到条目或缓存文件时返回 `404`。
+
+## 采集源与任务
+
+详见 `app/api/routes_sources.py`、`routes_jobs.py` 与 [../specs/20-collection-strategies.md](20-collection-strategies.md)。本节后续继续补全业务说明。

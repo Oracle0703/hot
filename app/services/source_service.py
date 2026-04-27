@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.models.item import CollectedItem
 from app.models.job_log import JobLog
+from app.models.site_account import SiteAccount
 from app.models.source import Source
 from app.schemas.source import SourceCreate, SourceUpdate
 
@@ -87,7 +88,9 @@ class SourceService:
         return [value for value in self.session.scalars(statement).all() if value]
 
     def create_source(self, data: SourceCreate) -> Source:
-        source = Source(**data.model_dump())
+        payload = data.model_dump()
+        self._ensure_account_id_bindable(payload.get("account_id"))
+        source = Source(**payload)
         self.session.add(source)
         self.session.commit()
         self.session.refresh(source)
@@ -99,6 +102,8 @@ class SourceService:
             return None
 
         for field_name, value in data.model_dump(exclude_unset=True).items():
+            if field_name == "account_id":
+                self._ensure_account_id_bindable(value)
             setattr(source, field_name, value)
 
         self.session.commit()
@@ -186,4 +191,13 @@ class SourceService:
         source.entry_url = str(payload['entry_url'])
         self.session.commit()
         self.session.refresh(source)
+
+    def _ensure_account_id_bindable(self, account_id) -> None:
+        if account_id is None:
+            return
+        account = self.session.get(SiteAccount, account_id)
+        if account is None:
+            raise ValueError("site account not found")
+        if not account.enabled:
+            raise ValueError("site account is disabled")
 

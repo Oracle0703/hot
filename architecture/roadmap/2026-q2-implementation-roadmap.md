@@ -4,7 +4,7 @@
 | --- | --- |
 | 时间范围 | 2026 Q2 |
 | 目标 | 先把当前项目升级为稳定采集内核，再逐步接入数据处理中心和订阅推送中心 |
-| 原则 | 先稳单用户内核，再做共享，再做分发，最后按需补桌面壳或多账号体系 |
+| 原则 | 先稳单用户内核，再做共享，再做分发，最后补桌面壳与首版多账号，再按需扩平台 |
 
 ## Phase 1：稳定采集内核
 
@@ -15,7 +15,7 @@
 | 范围 | 单用户登录态治理、失败分类、限速、重试、熔断、策略接口统一 |
 | 产出 | 稳定的采集执行内核，支持多人和多来源扩展 |
 | 当前落地 | `AuthStateService`、`FailureClassifier`、`CircuitBreakerService`、结构化任务日志 |
-| 暂不做 | 桌面壳、复杂权限、推荐系统、多账号体系 |
+| 暂不做 | 复杂权限、推荐系统、非 B站多账号体系 |
 
 ## Phase 2：数据处理中心基础
 
@@ -43,22 +43,22 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 状态 | 已完成当前轮核心闭环，仍有少量运营深化项待补 |
+| 状态 | 已完成当前轮核心闭环 |
 | 目标 | 提供内容查看、筛选、管理和追踪能力 |
 | 范围 | 内容列表、筛选页、推送状态页、失败状态页、账号态状态页 |
 | 产出 | 团队能够在统一界面查看内容和运行状态 |
-| 当前落地 | 已补齐 `/content-center`、`/subscriptions`、`/deliveries` 页面与对应 API，支持筛选、失败原因展示、单条/批量失败重试；独立账号态状态页仍未单独落地 |
+| 当前落地 | 已补齐 `/content-center`、`/subscriptions`、`/deliveries`、`/auth-state`、`/weekly` 页面与对应 API/交互，支持筛选、失败原因展示、单条/批量失败重试、B站多账号登录态巡检，以及周榜评分/推送/配置中心/调度页的运营闭环 |
 | 暂不做 | 重型 BI、复杂报表系统 |
 
 ## Phase 5：桌面壳与本地体验增强
 
 | 项目 | 内容 |
 | --- | --- |
-| 状态 | 已完成接入契约，实体壳层仍未开始 |
+| 状态 | 已完成 Electron 最小壳体、托盘/通知与发布集成，并补齐 B站首版多账号 |
 | 目标 | 在内核稳定后增强非技术用户的本地体验 |
 | 范围 | 一键启动、托盘、系统通知、本地登录辅助，或按需升级多账号管理 |
 | 产出 | 可选的 Tauri / Electron 壳层，或多账号版本 |
-| 当前落地 | 已新增 `/system/desktop-manifest`、JSON Schema、本地启动/探测/停止控制面、发布目录状态脚本与 consumer 示例；Electron / Tauri、托盘、通知、多账号仍未实现 |
+| 当前落地 | 已新增 `/system/desktop-manifest`、JSON Schema、本地启动/探测/停止控制面、发布目录状态脚本与 consumer 示例，并已补上 Electron 最小壳体、`build_desktop_shell.ps1`、`打开桌面版.bat`、托盘常驻、系统通知与 release 集成；同时已支持 B站账号槽位、来源绑定账号执行与多账号状态页 |
 | 暂不做 | 用桌面壳重写采集或数据处理内核 |
 
 ## 当前实施优先级
@@ -70,7 +70,7 @@
 | P0 | 已完成：统一站点策略接口 |
 | P1 | 已完成：建立 `RawItem` / `ContentItem` 两层模型 |
 | P1 | 已完成：建立规则驱动的订阅与推送链路 |
-| P2 | 已补齐共享视图筛选、投递状态页与桌面壳适配入口 |
+| P2 | 已补齐共享视图筛选、投递状态页、周榜运营闭环与桌面壳适配入口 |
 
 ## 当前仓库落地清单（截至 2026-04-26）
 
@@ -80,5 +80,7 @@
 | 运行治理 | 失败分类、重试边界、`RISK_CONTROL` 熔断与结构化任务日志已接入执行器 |
 | 内容中心 | 已新增 `RawItem` / `ContentItem` 模型、内容归一化服务与 API / 页面入口 |
 | 订阅中心 | 已新增 `Subscription` / `DeliveryRecord` 模型、匹配分发服务与 API / 页面入口 |
-| 桌面壳适配 | 已新增 `/system/desktop-manifest`、Pydantic manifest 模型、JSON Schema、launcher dry-run 本地入口清单、`--print-json` 结构化输出、`--probe` 本地实例探测、`status/stop` 结构化运维脚本与 consumer 示例，为后续桌面壳保留稳定接入面 |
+| 周榜运营闭环 | 已支持 `/weekly` 推荐评分、人工评分、批量钉钉推送，以及 `/config`、`/scheduler`、发布说明之间的双向回流 |
+| 桌面壳适配 | 已新增 `/system/desktop-manifest`、Pydantic manifest 模型、JSON Schema、launcher dry-run 本地入口清单、`--print-json` 结构化输出、`--probe` 本地实例探测、`status/stop` 结构化运维脚本、consumer 示例，以及 Electron 最小壳体、托盘/通知与 release 入口 |
+| 多账号体系 | 已新增 `site_accounts`、`sources.account_id`、`/api/site-accounts`、多账号 `/system/auth-state` 与 B站按账号执行链路 |
 | 验收覆盖 | 已补迁移校验与全链路冒烟，覆盖内容中心、订阅投递与桌面壳接入最小闭环 |

@@ -104,6 +104,7 @@ class TestFullSmoke:
 
     def test_full_pipeline_with_dingtalk_mock(self, tmp_path, monkeypatch) -> None:
         """TC-E2E-002: 配置来源 → 触发任务 → 报告产生 + DingTalk 通知被调用。"""
+        monkeypatch.setenv("APP_DEBUG", "true")
         monkeypatch.setenv("REPORTS_ROOT", str(tmp_path / "reports"))
         monkeypatch.setenv("ENABLE_DINGTALK_NOTIFIER", "true")
         monkeypatch.setenv(
@@ -144,6 +145,7 @@ class TestFullSmoke:
 
     def test_full_pipeline_promotes_content_and_auto_dispatches_subscription(self, tmp_path, monkeypatch) -> None:
         """TC-E2E-006: 任务产出内容中心记录，并按订阅规则自动生成投递记录。"""
+        monkeypatch.setenv("APP_DEBUG", "true")
         monkeypatch.setenv("REPORTS_ROOT", str(tmp_path / "reports"))
         monkeypatch.setenv("ENABLE_DINGTALK_NOTIFIER", "true")
         monkeypatch.setenv("DINGTALK_WEBHOOK", "https://oapi.dingtalk.com/robot/send?access_token=e2e-token")
@@ -201,6 +203,7 @@ class TestFullSmoke:
 
     def test_upgrade_preserves_data(self, tmp_path, monkeypatch) -> None:
         """TC-E2E-003: 模拟升级——同一 DB 重建 app,源/任务/报告记录全部保留。"""
+        monkeypatch.setenv("APP_DEBUG", "true")
         monkeypatch.setenv("REPORTS_ROOT", str(tmp_path / "reports"))
         html_path = tmp_path / "topics.html"
         html_path.write_text(HTML_FIXTURE, encoding="utf-8")
@@ -286,6 +289,7 @@ class TestFullSmoke:
 
     def test_concurrent_jobs_finalize_report(self, tmp_path, monkeypatch) -> None:
         """TC-E2E-005: 连续两次任务收尾,全局报告内容仍完整可读。"""
+        monkeypatch.setenv("APP_DEBUG", "true")
         monkeypatch.setenv("REPORTS_ROOT", str(tmp_path / "reports"))
         html_path = tmp_path / "topics.html"
         html_path.write_text(HTML_FIXTURE, encoding="utf-8")

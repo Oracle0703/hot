@@ -8,6 +8,7 @@ from app.services.auth_state_service import AuthStateService
 from app.services.strategies.bilibili_profile_videos_recent import (
     BilibiliProfileVideosRecentStrategy,
     _PlaywrightBilibiliProfileRunner,
+    _build_context_kwargs,
     _extract_bilibili_profile_video_items,
     _extract_items_from_api_payload,
 )
@@ -789,3 +790,17 @@ def test_bilibili_profile_runner_prefers_runtime_storage_state_when_present(tmp_
 
     assert len(items) == 1
     assert browser.new_context_kwargs['storage_state'] == str(storage_state_file)
+
+
+def test_bilibili_profile_build_context_kwargs_uses_bound_account_storage_state(tmp_path) -> None:
+    auth_state_service = AuthStateService(runtime_root=tmp_path)
+    storage_state_file = auth_state_service.build_paths("bilibili", "creator-a").storage_state_file
+    storage_state_file.parent.mkdir(parents=True, exist_ok=True)
+    storage_state_file.write_text('{"cookies":[],"origins":[]}', encoding='utf-8')
+
+    kwargs = _build_context_kwargs(
+        SimpleNamespace(account_key="creator-a"),
+        auth_state_service=auth_state_service,
+    )
+
+    assert kwargs["storage_state"] == str(storage_state_file)

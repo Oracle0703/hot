@@ -37,6 +37,8 @@
 - `spec.md`、`plan.md` 头部增加冻结说明,仅保留 MVP 历史快照。
 - `requirements.txt` 增补 `portalocker`、`cryptography`、`pyyaml`、`respx`(pytest mock)。
 - `tests/integration/test_scripts.py::test_launcher_dry_run_prints_local_runtime_summary` 改用 `sys.executable` 启动子进程,避免命中系统 Python 的旧依赖。
+- `app/config.py:get_settings()` 不再把 `APP_ENV` 等设置字段从运行时 `app.env` 回填进 `os.environ`,改为仅对非设置型运行时键做回填,修复发布目录 `APP_ENV=production` 污染后续测试进程的问题。
+- 新增 `tests/unit/test_config.py::test_get_settings_does_not_hydrate_settings_keys_into_process_env`,锁定“设置项可被读取但不污染进程环境”的回归约束。
 
 ### Deferred(后续版本继续)
 
@@ -100,7 +102,8 @@
 
 ### Verification
 
-- `pytest -q`: **364 passed / 0 skipped / 0 failed**(阶段 3.4 与 3.3 一致)。
+- `pytest -v`: **455 passed / 11 warnings**(2026-04-27 全量回归最新基线)。
+- 历史阶段基线 `364 passed / 0 skipped / 0 failed` 仍保留在阶段 3.3/3.4 条目中,仅作当时里程碑记录。
 - 架构费 / Pylance 诊断与老 lint 清零。
 - 历史 baseline 仅作参考,只以本条为准。
 

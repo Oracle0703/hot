@@ -59,3 +59,10 @@
 ## 10.7 验证
 
 参见 [../test-cases.md](../test-cases.md) `TC-CFG-*` 与 `tests/unit/test_config_schema.py`、`tests/unit/test_app_env_service.py`、`tests/integration/test_config_center_pages.py`。
+
+## 10.8 Weekly 相关配置
+
+| 配置项 | 默认值 | 说明 |
+| --- | --- | --- |
+| `WEEKLY_GRADE_PUSH_THRESHOLD` | `B+` | `/weekly` 批量推送时的人工评分阈值；支持 `S/A+/A/B+/B/C/D` |
+| `WEEKLY_COVER_CACHE_RETENTION_DAYS` | `60` | 周榜封面缓存保留天数；后台任务会按该值清理 `outputs/weekly-covers/` 中的过期文件 |

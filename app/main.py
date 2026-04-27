@@ -9,6 +9,7 @@ from app.api.routes_deliveries import router as deliveries_router
 from app.api.routes_jobs import router as jobs_router
 from app.api.routes_pages import configure_job_dispatcher, router as pages_router
 from app.api.routes_reports import router as reports_router
+from app.api.routes_site_accounts import router as site_accounts_router
 from app.api.routes_sources import configure_session_factory, router as sources_router
 from app.api.routes_subscriptions import router as subscriptions_router
 from app.api.routes_system import (
@@ -73,6 +74,7 @@ def create_app(start_background_workers: bool = True) -> FastAPI:
     app.state.scheduler_loop = scheduler_loop
     app.include_router(content_router)
     app.include_router(deliveries_router)
+    app.include_router(site_accounts_router)
     app.include_router(sources_router)
     app.include_router(jobs_router)
     app.include_router(reports_router)

@@ -1,6 +1,6 @@
 # 测试用例总表（docs/test-cases.md）
 
-> 状态截至 阶段 3.4：用例表已按当前实现回对，`pytest -q` = 364 passed / 0 skipped。
+> 状态截至 2026-04-27：用例表已按当前实现回对，`pytest -v` = 455 passed / 11 warnings。
 > 编号规则：`TC-<域>-<3 位序号>`。新增用例时同时在 `tests/` 下放骨架文件（`@pytest.mark.skip(reason="TC-... 待实现")`）。
 > 已实现用例去掉 `skip`，并在 [`../CHANGELOG.md`](../CHANGELOG.md) 记录。
 > 状态：`todo` 待实现 / `wip` 实现中 / `done` 已通过。
@@ -47,6 +47,7 @@
 | TC-CFG-105 | export(mask=True) 返回脱敏     | 含 BILIBILI_COOKIE                             | 输出文本不含完整 cookie                                | done |
 | TC-CFG-106 | export(mask=False) 仅 DEBUG    | APP_DEBUG=false                                | 返回 403                                               | done |
 | TC-CFG-107 | schema 汇总多字段错误          | 多字段同时非法                                 | `ValidationError.errors()` 返回多条字段错误            | done |
+| TC-CFG-108 | app.env 设置项不污染进程环境   | `app.env` 含 `APP_ENV=production`              | `Settings.environment == "production"` 且不写回 `os.environ["APP_ENV"]` | done |
 
 ## SYS — 版本、健康、备份、日志、停止脚本
 

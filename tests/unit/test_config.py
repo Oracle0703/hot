@@ -49,6 +49,23 @@ def test_get_settings_hydrates_non_settings_runtime_env_keys(tmp_path, monkeypat
     assert os.environ['X_CT0'] == 'test-ct0'
 
 
+def test_get_settings_does_not_hydrate_settings_keys_into_process_env(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv('HOT_RUNTIME_ROOT', str(tmp_path))
+    monkeypatch.delenv('APP_ENV', raising=False)
+
+    env_file = tmp_path / 'data' / 'app.env'
+    env_file.parent.mkdir(parents=True, exist_ok=True)
+    env_file.write_text(
+        'APP_ENV=production\n',
+        encoding='utf-8-sig',
+    )
+
+    settings = get_settings()
+
+    assert settings.environment == 'production'
+    assert 'APP_ENV' not in os.environ
+
+
 def test_get_settings_reads_bilibili_cookie_from_runtime_env_file(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv('HOT_RUNTIME_ROOT', str(tmp_path))
     monkeypatch.delenv('BILIBILI_COOKIE', raising=False)

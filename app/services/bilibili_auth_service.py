@@ -48,10 +48,10 @@ class BilibiliBrowserAuthService:
         self.poll_interval_ms = poll_interval_ms
         self.navigation_timeout_ms = navigation_timeout_ms
 
-    def login_and_sync(self) -> BilibiliBrowserAuthResult:
-        return _run_awaitable_sync(self._login_and_sync())
+    def login_and_sync(self, account_key: str = "default") -> BilibiliBrowserAuthResult:
+        return _run_awaitable_sync(self._login_and_sync(account_key=account_key))
 
-    async def _login_and_sync(self) -> BilibiliBrowserAuthResult:
+    async def _login_and_sync(self, account_key: str = "default") -> BilibiliBrowserAuthResult:
         try:
             from playwright.async_api import async_playwright
         except ModuleNotFoundError as exc:  # pragma: no cover
@@ -59,7 +59,7 @@ class BilibiliBrowserAuthService:
 
         runtime_paths = get_runtime_paths(self.auth_state_service.runtime_root)
         runtime_paths.ensure_directories()
-        auth_paths = self.auth_state_service.build_paths("bilibili")
+        auth_paths = self.auth_state_service.build_paths("bilibili", account_key)
         launch_kwargs = build_playwright_launch_kwargs(self.start_url, headless=False)
 
         async with async_playwright() as playwright:
@@ -75,7 +75,7 @@ class BilibiliBrowserAuthService:
             finally:
                 await context.close()
 
-        settings = self.app_env_service.update_bilibili_settings(cookie=cookie_value)
+        settings = self.app_env_service.update_bilibili_settings(cookie=cookie_value, account_key=account_key)
         return BilibiliBrowserAuthResult(
             cookie=settings.cookie,
             storage_state_file=auth_paths.storage_state_file,

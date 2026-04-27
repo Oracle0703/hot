@@ -24,3 +24,11 @@ def test_weekly_rating_service_compares_grades_by_rank() -> None:
     assert service.is_grade_at_least("B+", "B+") is True
     assert service.is_grade_at_least("B", "B+") is False
     assert service.is_grade_at_least(None, "B+") is False
+
+
+def test_weekly_rating_service_normalizes_grade_text() -> None:
+    service = WeeklyRatingService()
+
+    assert service.normalize_grade(" a+ ") == "A+"
+    assert service.normalize_grade("b+") == "B+"
+    assert service.normalize_grade("unknown") is None

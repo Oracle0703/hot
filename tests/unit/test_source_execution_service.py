@@ -173,6 +173,35 @@ def test_source_execution_service_dispatches_to_bilibili_profile_video_strategy(
     assert result["items"][0]["url"] == "https://www.bilibili.com/video/BV1TEST"
 
 
+def test_source_execution_service_injects_bilibili_account_context_for_strategy() -> None:
+    strategy = _FakeStrategy(
+        [
+            {
+                "title": "UP 更新",
+                "url": "https://www.bilibili.com/video/BV1ACCOUNT",
+                "published_at": "2026-03-30",
+            }
+        ]
+    )
+
+    source = SimpleNamespace(collection_strategy="bilibili_profile_videos_recent", account_id="demo-account-id")
+    service = SourceExecutionService(
+        _UnexpectedRegistry(),
+        strategy_factory=lambda name: strategy,
+        account_context_resolver=lambda candidate: {
+            "account_key": "creator-a",
+            "account_cookie": "SESSDATA=creator-sess; bili_jct=creator-jct; DedeUserID=2",
+        },
+    )
+
+    result = service.execute(source)
+
+    executed_source = strategy.executed_sources[0]
+    assert executed_source.account_key == "creator-a"
+    assert executed_source.account_cookie.startswith("SESSDATA=creator-sess")
+    assert result["item_count"] == 1
+
+
 def test_source_execution_service_rejects_strategy_returning_none() -> None:
     source = SimpleNamespace(collection_strategy="youtube_channel_recent")
     service = SourceExecutionService(_UnexpectedRegistry(), strategy_factory=lambda name: _FakeStrategy(None))
