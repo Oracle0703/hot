@@ -90,7 +90,7 @@ def _infer_source_name(entry_url: str, strategy: CollectionStrategy, search_keyw
 
 def _build_form_payload(form_data: dict[str, list[str]]) -> SourceCreate:
     entry_url = _get_form_value(form_data, "entry_url")
-    max_items_raw = _get_form_value(form_data, "max_items", "30")
+    max_items_raw = _get_form_value(form_data, "max_items", "1")
     explicit_strategy = _normalize_optional_text(_get_form_value(form_data, "collection_strategy"))
     search_keyword = _normalize_optional_text(_get_form_value(form_data, "search_keyword"))
     strategy = _infer_collection_strategy(entry_url, explicit_strategy)
@@ -142,7 +142,7 @@ def _build_form_payload(form_data: dict[str, list[str]]) -> SourceCreate:
             meta_selector=_normalize_optional_text(_get_form_value(form_data, "meta_selector")),
             include_keywords=_parse_form_list(_get_form_value(form_data, "include_keywords")),
             exclude_keywords=_parse_form_list(_get_form_value(form_data, "exclude_keywords")),
-            max_items=(30 if max_items_raw == "" else max_items_raw),
+            max_items=(1 if max_items_raw == "" else max_items_raw),
             enabled=True,
             source_group=source_group,
             schedule_group=schedule_group,

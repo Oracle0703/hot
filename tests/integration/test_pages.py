@@ -320,6 +320,9 @@ def test_sources_page_lists_sources_and_actions(tmp_path) -> None:
     assert "source-group-count" in response.text
     assert "NGA Hot" in response.text
     assert "编辑" in response.text
+    assert "class='button button-secondary' href='/sources/" in response.text
+    assert ".page-actions .button," in response.text
+    assert ".page-actions button {" in response.text
     assert "/sources/" in response.text
 
 
@@ -330,7 +333,11 @@ def test_content_center_page_is_accessible(tmp_path) -> None:
 
     assert response.status_code == 200
     assert "内容中心" in response.text
-    assert "/api/content" in response.text
+    assert "预览 API 返回" in response.text
+    assert "复制接口地址" in response.text
+    assert "id='content-api-preview'" in response.text
+    assert "data-api-url='/api/content'" in response.text
+    assert "href='/api/content'" not in response.text
 
 
 def test_content_center_page_supports_filtering(tmp_path) -> None:
@@ -364,6 +371,7 @@ def test_content_center_page_supports_filtering(tmp_path) -> None:
     assert "name='tag'" in response.text
     assert "校招信息汇总" in response.text
     assert "版号情报汇总" not in response.text
+    assert "/api/content?title=%E6%A0%A1%E6%8B%9B&amp;tag=HR%E6%83%85%E6%8A%A5%E6%BA%90" in response.text
 
 
 def test_subscriptions_page_is_accessible(tmp_path) -> None:
@@ -850,11 +858,40 @@ def test_new_source_page_shows_simplified_source_form_fields(tmp_path) -> None:
     assert "第 2 步" in response.text
     assert "<option value='domestic' selected>国内</option>" in response.text
     assert "国内用于“立即采集国内”，国外用于“立即采集国外”" in response.text
+    assert "name='max_items' value='1'" in response.text
     assert "https://space.bilibili.com/20411266" in response.text
     assert "name='name'" not in response.text
     assert "name='list_selector'" not in response.text
     assert "name='include_keywords'" not in response.text
     assert "name='fetch_mode'" not in response.text
+    assert "action='/sources/new'" in response.text
+
+
+def test_new_source_page_invalid_submit_stays_on_page_and_shows_error_toast(tmp_path) -> None:
+    client = create_test_client(make_sqlite_url(tmp_path, "pages-source-form-invalid.db"))
+
+    response = client.post(
+        "/sources/new",
+        data={
+            "entry_url": "https://www.bilibili.com/",
+            "search_keyword": "",
+            "source_group": "domestic",
+            "schedule_group": "evening",
+            "max_items": "1",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 422
+    assert "text/html" in response.headers["content-type"]
+    assert "新增采集源" in response.text
+    assert "source-wizard" in response.text
+    assert "toast toast-error" in response.text
+    assert "search_keyword is required for bilibili_site_search" in response.text
+    assert "value='https://www.bilibili.com/'" in response.text
+    assert "value='evening'" in response.text
+    assert "name='max_items' value='1'" in response.text
+    assert client.get("/api/sources").json() == []
 
 
 def test_post_run_domestic_job_redirects_to_job_detail_page(tmp_path) -> None:

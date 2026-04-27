@@ -103,9 +103,11 @@ def test_weekly_dingtalk_push_service_pushes_only_eligible_unpushed_items(tmp_pa
     assert pushed_count == 1
     assert len(requests) == 1
     markdown = requests[0]["payload"]["markdown"]
-    assert markdown["title"] == "热点报告 人工筛选结果"
+    assert markdown["title"] == "热点报告 筛选结果"
     assert "[视频111](https://www.bilibili.com/video/BV111)" in markdown["text"]
-    assert "人工评分：A | 推荐评分：B+" in markdown["text"]
+    assert "评分：A" in markdown["text"]
+    assert "推荐评分" not in markdown["text"]
+    assert "人工评分" not in markdown["text"]
     assert eligible.pushed_to_dingtalk_at is not None
     assert eligible.pushed_to_dingtalk_batch_id
     parsed = urlparse(requests[0]["webhook"])

@@ -478,6 +478,235 @@ def test_weekly_page_supports_saving_manual_grades_and_batch_pushing(tmp_path, m
         assert second_item.pushed_to_dingtalk_at is None
 
 
+def test_weekly_page_direct_batch_push_uses_current_form_grades(tmp_path, monkeypatch) -> None:
+    database_url = make_sqlite_url(tmp_path, "weekly-rating-direct-push-page.db")
+    client = create_test_client(database_url)
+    now = datetime(2026, 4, 23, 20, 0, 0)
+    monkeypatch.setenv("ENABLE_DINGTALK_NOTIFIER", "true")
+    monkeypatch.setenv("DINGTALK_WEBHOOK", "https://oapi.dingtalk.com/robot/send?access_token=test-token")
+    monkeypatch.setenv("WEEKLY_GRADE_PUSH_THRESHOLD", "B+")
+
+    from app.api import routes_reports
+    from app.services import weekly_dingtalk_push_service
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def utcnow(cls) -> datetime:
+            return now
+
+    requests: list[dict[str, object]] = []
+
+    def fake_sender(webhook: str, payload: dict[str, object], timeout_seconds: float, secret: str | None) -> None:
+        requests.append({"webhook": webhook, "payload": payload})
+
+    monkeypatch.setattr(routes_reports, "datetime", FrozenDateTime)
+    monkeypatch.setattr(weekly_dingtalk_push_service, "datetime", FrozenDateTime)
+    monkeypatch.setattr(weekly_dingtalk_push_service.WeeklyDingTalkPushService, "_send", staticmethod(fake_sender))
+
+    with SessionFactoryHolder.factory() as session:
+        source = Source(
+            name="测试来源",
+            site_name="Bilibili",
+            entry_url="https://space.bilibili.com/281232336",
+            fetch_mode="http",
+            parser_type="generic_css",
+            max_items=10,
+            enabled=True,
+        )
+        session.add(source)
+        session.commit()
+        session.refresh(source)
+        item = CollectedItem(
+            source_id=source.id,
+            job_id=as_uuid("10111111-1111-1111-1111-111111111111"),
+            first_seen_job_id=as_uuid("10111111-1111-1111-1111-111111111111"),
+            last_seen_job_id=as_uuid("10111111-1111-1111-1111-111111111111"),
+            title="直接推送视频",
+            url="https://www.bilibili.com/video/BV1DIRECT1/",
+            published_at=now - timedelta(hours=1),
+            published_at_text="2026-04-23 19:00:00",
+            first_seen_at=now - timedelta(days=1),
+            last_seen_at=now - timedelta(days=1),
+            like_count=300,
+            view_count=20000,
+            reply_count=120,
+            normalized_hash="weekly-rating-direct-push-1",
+        )
+        session.add(item)
+        session.commit()
+        item_id = str(item.id)
+
+    push_response = client.post(
+        "/weekly/ratings",
+        content=f"grade_{item_id}=A&action=push",
+        headers={"content-type": "application/x-www-form-urlencoded"},
+        follow_redirects=False,
+    )
+
+    assert push_response.status_code == 303
+    assert push_response.headers["location"] == "/weekly?pushed_count=1"
+    assert len(requests) == 1
+
+    with SessionFactoryHolder.factory() as session:
+        item = session.get(CollectedItem, UUID(item_id))
+
+    assert item is not None
+    assert item.manual_grade == "A"
+    assert item.pushed_to_dingtalk_at is not None
+
+
+def test_weekly_page_supports_previewing_markdown_before_batch_push(tmp_path, monkeypatch) -> None:
+    database_url = make_sqlite_url(tmp_path, "weekly-rating-push-preview-page.db")
+    client = create_test_client(database_url)
+    now = datetime(2026, 4, 23, 20, 0, 0)
+    monkeypatch.setenv("ENABLE_DINGTALK_NOTIFIER", "true")
+    monkeypatch.setenv("DINGTALK_WEBHOOK", "https://oapi.dingtalk.com/robot/send?access_token=test-token")
+    monkeypatch.setenv("WEEKLY_GRADE_PUSH_THRESHOLD", "B+")
+
+    from app.api import routes_reports
+    from app.services import weekly_dingtalk_push_service
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def utcnow(cls) -> datetime:
+            return now
+
+    requests: list[dict[str, object]] = []
+
+    def fake_sender(webhook: str, payload: dict[str, object], timeout_seconds: float, secret: str | None) -> None:
+        requests.append({"webhook": webhook, "payload": payload})
+
+    monkeypatch.setattr(routes_reports, "datetime", FrozenDateTime)
+    monkeypatch.setattr(weekly_dingtalk_push_service, "datetime", FrozenDateTime)
+    monkeypatch.setattr(weekly_dingtalk_push_service.WeeklyDingTalkPushService, "_send", staticmethod(fake_sender))
+
+    with SessionFactoryHolder.factory() as session:
+        source = Source(
+            name="测试来源",
+            site_name="Bilibili",
+            entry_url="https://space.bilibili.com/281232336",
+            fetch_mode="http",
+            parser_type="generic_css",
+            max_items=10,
+            enabled=True,
+        )
+        session.add(source)
+        session.commit()
+        session.refresh(source)
+        first_item = CollectedItem(
+            source_id=source.id,
+            job_id=as_uuid("12111111-1111-1111-1111-111111111111"),
+            first_seen_job_id=as_uuid("12111111-1111-1111-1111-111111111111"),
+            last_seen_job_id=as_uuid("12111111-1111-1111-1111-111111111111"),
+            title="可预览推送视频",
+            url="https://www.bilibili.com/video/BV1PREVIEW1/",
+            published_at=now - timedelta(hours=1),
+            published_at_text="2026-04-23 19:00:00",
+            first_seen_at=now - timedelta(days=1),
+            last_seen_at=now - timedelta(days=1),
+            like_count=300,
+            view_count=20000,
+            reply_count=120,
+            normalized_hash="weekly-rating-push-preview-1",
+        )
+        second_item = CollectedItem(
+            source_id=source.id,
+            job_id=as_uuid("12222222-2222-2222-2222-222222222222"),
+            first_seen_job_id=as_uuid("12222222-2222-2222-2222-222222222222"),
+            last_seen_job_id=as_uuid("12222222-2222-2222-2222-222222222222"),
+            title="不进入预览视频",
+            url="https://www.bilibili.com/video/BV1PREVIEW2/",
+            published_at=now - timedelta(hours=2),
+            published_at_text="2026-04-23 18:00:00",
+            first_seen_at=now - timedelta(days=1),
+            last_seen_at=now - timedelta(days=1),
+            like_count=30,
+            view_count=5000,
+            reply_count=10,
+            normalized_hash="weekly-rating-push-preview-2",
+        )
+        third_item = CollectedItem(
+            source_id=source.id,
+            job_id=as_uuid("12333333-3333-3333-3333-333333333333"),
+            first_seen_job_id=as_uuid("12333333-3333-3333-3333-333333333333"),
+            last_seen_job_id=as_uuid("12333333-3333-3333-3333-333333333333"),
+            title="已推送旧视频",
+            url="https://www.bilibili.com/video/BV1PREVIEW3/",
+            published_at=now - timedelta(hours=3),
+            published_at_text="2026-04-23 17:00:00",
+            first_seen_at=now - timedelta(days=1),
+            last_seen_at=now - timedelta(days=1),
+            like_count=500,
+            view_count=50000,
+            reply_count=220,
+            pushed_to_dingtalk_at=now - timedelta(minutes=10),
+            pushed_to_dingtalk_batch_id="batch-old-preview",
+            normalized_hash="weekly-rating-push-preview-3",
+        )
+        session.add_all([first_item, second_item, third_item])
+        session.commit()
+        first_item_id = str(first_item.id)
+        second_item_id = str(second_item.id)
+        third_item_id = str(third_item.id)
+
+    preview_response = client.post(
+        "/weekly/ratings",
+        content=f"grade_{first_item_id}=A&grade_{second_item_id}=B&grade_{third_item_id}=S&action=preview",
+        headers={"content-type": "application/x-www-form-urlencoded"},
+        follow_redirects=False,
+    )
+
+    assert preview_response.status_code == 303
+    assert preview_response.headers["location"] == "/weekly?preview_push=1"
+
+    with SessionFactoryHolder.factory() as session:
+        first_item = session.get(CollectedItem, UUID(first_item_id))
+        second_item = session.get(CollectedItem, UUID(second_item_id))
+        third_item = session.get(CollectedItem, UUID(third_item_id))
+        assert first_item is not None
+        assert second_item is not None
+        assert third_item is not None
+        assert first_item.manual_grade == "A"
+        assert second_item.manual_grade == "B"
+        assert third_item.manual_grade == "S"
+
+    weekly_page = client.get("/weekly")
+    assert "预览推送内容" in weekly_page.text
+    assert "批量推送达标项" in weekly_page.text
+    assert "确认推送到钉钉" not in weekly_page.text
+
+    preview_page = client.get(preview_response.headers["location"])
+
+    assert preview_page.status_code == 200
+    assert "本次将推送 1 条达标内容到钉钉。" in preview_page.text
+    assert "当前推送阈值</strong> B+" in preview_page.text
+    assert "未达阈值跳过</strong> 1 条" in preview_page.text
+    assert "已推送跳过</strong> 1 条" in preview_page.text
+    assert "钉钉消息预览" in preview_page.text
+    assert "weekly-preview-card" in preview_page.text
+    preview_section = preview_page.text.split("weekly-preview-panel", 1)[1].split("weekly-hot-table", 1)[0]
+    assert "评分</strong> A" in preview_section
+    assert "人工评分：" not in preview_page.text
+    assert "推荐评分：" not in preview_page.text
+    assert "点赞 300" in preview_page.text
+    assert "播放 20000" in preview_page.text
+    assert "查看原始 Markdown" in preview_page.text
+    assert "返回继续改评分" in preview_page.text
+    assert "href='#weekly-rating-table'" in preview_page.text
+    assert "### 热点报告 筛选结果" in preview_page.text
+    assert "将按当前阈值 B+ 去重后发送" in preview_page.text
+    assert "[可预览推送视频](https://www.bilibili.com/video/BV1PREVIEW1/)" in preview_section
+    assert "不进入预览视频" not in preview_section
+    assert "确认推送到钉钉" in preview_page.text
+    assert requests == []
+
+    push_response = client.post("/weekly/push", follow_redirects=False)
+
+    assert push_response.status_code == 303
+    assert push_response.headers["location"] == "/weekly?pushed_count=1"
+    assert len(requests) == 1
+
+
 def test_weekly_page_push_shows_empty_feedback_when_no_item_matches_threshold(tmp_path, monkeypatch) -> None:
     database_url = make_sqlite_url(tmp_path, "weekly-rating-push-empty-page.db")
     client = create_test_client(database_url)
@@ -546,6 +775,63 @@ def test_weekly_page_push_shows_empty_feedback_when_no_item_matches_threshold(tm
 
     assert weekly_page.status_code == 200
     assert "当前没有达到阈值且未推送的内容。" in weekly_page.text
+
+
+def test_weekly_page_preview_shows_empty_feedback_when_no_item_matches_threshold(tmp_path, monkeypatch) -> None:
+    database_url = make_sqlite_url(tmp_path, "weekly-rating-push-preview-empty-page.db")
+    client = create_test_client(database_url)
+    now = datetime(2026, 4, 23, 20, 0, 0)
+    monkeypatch.setenv("ENABLE_DINGTALK_NOTIFIER", "true")
+    monkeypatch.setenv("DINGTALK_WEBHOOK", "https://oapi.dingtalk.com/robot/send?access_token=test-token")
+    monkeypatch.setenv("WEEKLY_GRADE_PUSH_THRESHOLD", "A")
+
+    from app.api import routes_reports
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def utcnow(cls) -> datetime:
+            return now
+
+    monkeypatch.setattr(routes_reports, "datetime", FrozenDateTime)
+
+    with SessionFactoryHolder.factory() as session:
+        source = Source(
+            name="测试来源",
+            site_name="Bilibili",
+            entry_url="https://space.bilibili.com/281232336",
+            fetch_mode="http",
+            parser_type="generic_css",
+            max_items=10,
+            enabled=True,
+        )
+        session.add(source)
+        session.commit()
+        session.refresh(source)
+        item = CollectedItem(
+            source_id=source.id,
+            job_id=as_uuid("13333333-3333-3333-3333-333333333333"),
+            first_seen_job_id=as_uuid("13333333-3333-3333-3333-333333333333"),
+            last_seen_job_id=as_uuid("13333333-3333-3333-3333-333333333333"),
+            title="预览未达阈值视频",
+            url="https://www.bilibili.com/video/BV1PREVIEW3/",
+            published_at=now - timedelta(hours=3),
+            published_at_text="2026-04-23 17:00:00",
+            first_seen_at=now - timedelta(days=1),
+            last_seen_at=now - timedelta(days=1),
+            like_count=30,
+            view_count=5000,
+            reply_count=10,
+            manual_grade="B+",
+            normalized_hash="weekly-rating-push-preview-empty-1",
+        )
+        session.add(item)
+        session.commit()
+
+    preview_page = client.get("/weekly?preview_push=1")
+
+    assert preview_page.status_code == 200
+    assert "当前没有达到阈值且未推送的内容。" in preview_page.text
+    assert "确认推送到钉钉" not in preview_page.text
 
 
 def test_weekly_page_shows_config_updated_feedback_with_current_settings(tmp_path, monkeypatch) -> None:

@@ -14,7 +14,11 @@ $AppDir = Join-Path $OutputDir 'app'
 $AssetsSourceDir = Join-Path $SourceDir 'assets'
 $AssetsOutputDir = Join-Path $AppDir 'assets'
 $LaunchBat = Join-Path $OutputDir 'launch-desktop-shell.bat'
+$ElectronModuleDir = Join-Path $SourceDir 'node_modules\electron'
 $ElectronRuntimeSource = Join-Path $SourceDir 'node_modules\electron\dist'
+$ElectronInstallScript = Join-Path $ElectronModuleDir 'install.js'
+$ElectronPathFile = Join-Path $ElectronModuleDir 'path.txt'
+$ElectronExecutable = Join-Path $ElectronRuntimeSource 'electron.exe'
 
 function Invoke-Message {
     param([string]$Text)
@@ -55,6 +59,10 @@ function New-FileContent {
     }
 }
 
+function Test-ElectronRuntimeReady {
+    return (Test-Path $ElectronExecutable) -and (Test-Path $ElectronPathFile)
+}
+
 Invoke-Message "准备 Electron 桌面壳: $SourceDir"
 Invoke-Message "目标输出目录: $OutputDir"
 
@@ -63,6 +71,14 @@ if (-not (Test-Path $SourceDir)) {
 }
 
 Invoke-Step -FilePath 'npm.cmd' -Arguments @('install', '--no-fund', '--no-audit', '--package-lock=false') -DisplayCommand 'npm install --no-fund --no-audit --package-lock=false' -WorkingDirectory $SourceDir
+
+if (-not $DryRun -and -not (Test-ElectronRuntimeReady)) {
+    if (-not (Test-Path $ElectronInstallScript)) {
+        throw "Electron 运行时不完整，且缺少修复脚本: $ElectronInstallScript"
+    }
+    Invoke-Message "检测到 Electron 运行时不完整，执行修复安装: $ElectronInstallScript"
+    Invoke-Step -FilePath 'node.exe' -Arguments @($ElectronInstallScript) -DisplayCommand 'node node_modules\electron\install.js' -WorkingDirectory $SourceDir
+}
 
 Invoke-Message "复制 Electron 运行时: $ElectronRuntimeSource -> $RuntimeDir"
 Invoke-Message "Electron 主程序: $RuntimeDir\\electron.exe"
@@ -80,6 +96,9 @@ set "HOT_DESKTOP_RUNTIME_ROOT=%~dp0.."
 if (-not $DryRun) {
     if (-not (Test-Path $ElectronRuntimeSource)) {
         throw "未找到 Electron 运行时目录: $ElectronRuntimeSource"
+    }
+    if (-not (Test-ElectronRuntimeReady)) {
+        throw "Electron 运行时缺少主程序或 path.txt: $ElectronExecutable / $ElectronPathFile"
     }
 
     if (Test-Path $OutputDir) {

@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from html import escape
+import json
 from urllib.parse import parse_qs, urlencode
 from uuid import UUID
 
@@ -13,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.api.routes_content import query_content_items
 from app.api.routes_deliveries import query_delivery_rows
-from app.api.routes_sources import get_db_session
+from app.api.routes_sources import _build_form_payload, get_db_session
 from app.api.routes_subscriptions import query_subscriptions
 from app.config import get_settings
 from app.models.content_item import ContentItem
@@ -350,7 +351,7 @@ def _render_source_card(source) -> str:
     enabled_text = "\u5df2\u542f\u7528" if source.enabled else "\u5df2\u505c\u7528"
     group_text = _source_group_label(getattr(source, "source_group", None))
     schedule_group_text = _schedule_group_label(getattr(source, "schedule_group", None))
-    edit_link = _button_link('编辑', f'/sources/{source.id}')
+    edit_link = _button_link('编辑', f'/sources/{source.id}', 'button-secondary')
     delete_form = f"""
     <form class='inline-form' method='post' action='/api/sources/{source.id}/delete' onsubmit=\"return confirm('确认删除这个采集员吗？');\">
       <button class='button-secondary' type='submit'>删除</button>
@@ -423,6 +424,110 @@ def _render_bilibili_account_key_select(*, accounts, selected_account_key: str =
         "<span class='field-help'>默认账号写入 BILIBILI_COOKIE；额外账号会写入各自的 BILIBILI_COOKIE__ACCOUNT_KEY。</span>"
         "</label>"
     )
+
+
+def _normalize_source_form_error(detail) -> str:
+    if isinstance(detail, list):
+        messages: list[str] = []
+        for item in detail:
+            if isinstance(item, dict):
+                field_name = ".".join(str(part) for part in item.get("loc", []) if str(part) != "body")
+                message = str(item.get("msg") or item)
+                messages.append(f"{field_name}: {message}" if field_name else message)
+            else:
+                messages.append(str(item))
+        return "; ".join(message for message in messages if message) or "保存失败，请检查输入后重试"
+    return str(detail or "保存失败，请检查输入后重试")
+
+
+def _render_form_toast(message: str | None, *, tone: str = "error") -> str:
+    if not message:
+        return ""
+    return (
+        "<div class='toast-stack' aria-live='polite' aria-atomic='true'>"
+        f"<div class='toast toast-{escape(tone, quote=True)}'>{escape(message)}</div>"
+        "</div>"
+    )
+
+
+def _render_new_source_page(*, session: Session, values: dict[str, str] | None = None, error: str | None = None) -> str:
+    values = values or {}
+    entry_url_value = values.get("entry_url", "")
+    search_keyword_value = values.get("search_keyword", "")
+    source_group_value = values.get("source_group", "domestic") or "domestic"
+    schedule_group_value = values.get("schedule_group", "")
+    account_id_value = values.get("account_id", "")
+    max_items_value = values.get("max_items", "1") or "1"
+    account_field = _render_site_account_select(
+        accounts=SiteAccountService(session).list_accounts(platform="bilibili"),
+        selected_account_id=account_id_value,
+        required_for_bilibili=True,
+    )
+    toast_html = _render_form_toast(error, tone="error")
+    form = f"""
+    <form method='post' action='/sources/new' class='source-wizard'>
+      {toast_html}
+      <section class='source-step-panel'>
+        <div class='source-step-head'>
+          <span class='source-step-index'>第 1 步</span>
+          <div>
+            <h3 class='source-step-title'>确定来源入口</h3>
+            <p class='source-step-desc'>先填写入口地址和可选关键词，系统会自动推断合适的平台与采集策略。</p>
+          </div>
+        </div>
+        <div class='field-grid source-config-grid'>
+          <label class='field source-field-full'>
+            <span class='label'>入口 URL</span>
+            <input class='form-control' name='entry_url' value='{escape(entry_url_value, quote=True)}' placeholder='https://www.youtube.com/@ElectronicArts ? https://space.bilibili.com/20411266' />
+          </label>
+          <label class='field'>
+            <span class='label'>关键词</span>
+            <input class='form-control' name='search_keyword' value='{escape(search_keyword_value, quote=True)}' placeholder='例如：游戏' />
+          </label>
+        </div>
+      </section>
+      <section class='source-step-panel'>
+        <div class='source-step-head'>
+          <span class='source-step-index'>第 2 步</span>
+          <div>
+            <h3 class='source-step-title'>配置采集范围</h3>
+            <p class='source-step-desc'>设置来源分组、调度分组和最大抓取条数，方便后续按地区或时段运行。</p>
+          </div>
+        </div>
+        <div class='field-grid source-config-grid'>
+          <label class='field'>
+            <span class='label'>来源分组</span>
+            <select class='form-control' name='source_group'>
+              <option value='domestic'{' selected' if source_group_value == 'domestic' else ''}>国内</option>
+              <option value='overseas'{' selected' if source_group_value == 'overseas' else ''}>国外</option>
+            </select>
+            <span class='field-help'>国内用于“立即采集国内”，国外用于“立即采集国外”。</span>
+          </label>
+          <label class='field'>
+            <span class='label'>调度分组</span>
+            <input class='form-control' name='schedule_group' value='{escape(schedule_group_value, quote=True)}' placeholder='例如：morning；留空则不参与定时任务' />
+          </label>
+          {account_field}
+          <label class='field'>
+            <span class='label'>最大条数</span>
+            <input class='form-control' name='max_items' value='{escape(max_items_value, quote=True)}' />
+          </label>
+        </div>
+      </section>
+      <p class='helper-note source-config-full'>只需要填写 URL、分组、关键词和条数，系统会自动推断最合适的采集策略。</p>
+      <div class='page-actions source-config-full source-actions-row'>{_button_submit(SAVE_SOURCE_LABEL)}</div>
+    </form>
+    """
+    content = (
+        render_page_header(
+            eyebrow='Source Setup',
+            title=NEW_SOURCE_TITLE,
+            subtitle='用简化表单快速录入一个新的热点入口，适合运营同学日常维护。',
+            actions=_button_link('返回来源列表', '/sources'),
+        )
+        + render_panel(BASE_CONFIG_TITLE, form, extra_class='form-panel', actions="<span class='panel-header-note'>当前支持平台：Bilibili / X / YouTube</span>")
+    )
+    return render_page(title=NEW_SOURCE_TITLE, content=content, body_class='theme-dark')
 
 
 def _render_source_edit_page(source, *, site_accounts, error: str | None = None) -> str:
@@ -1121,74 +1226,29 @@ def sources_page(request: Request, session: Session = Depends(get_db_session)) -
 
 @router.get('/sources/new', response_class=HTMLResponse)
 def new_source_page(session: Session = Depends(get_db_session)) -> str:
-    account_field = _render_site_account_select(
-        accounts=SiteAccountService(session).list_accounts(platform="bilibili"),
-        selected_account_id=None,
-        required_for_bilibili=True,
-    )
-    form = f"""
-    <form method='post' action='/api/sources/form' class='source-wizard'>
-      <section class='source-step-panel'>
-        <div class='source-step-head'>
-          <span class='source-step-index'>第 1 步</span>
-          <div>
-            <h3 class='source-step-title'>确定来源入口</h3>
-            <p class='source-step-desc'>先填写入口地址和可选关键词，系统会自动推断合适的平台与采集策略。</p>
-          </div>
-        </div>
-        <div class='field-grid source-config-grid'>
-          <label class='field source-field-full'>
-            <span class='label'>\u5165\u53e3 URL</span>
-            <input class='form-control' name='entry_url' placeholder='https://www.youtube.com/@ElectronicArts ? https://space.bilibili.com/20411266' />
-          </label>
-          <label class='field'>
-            <span class='label'>\u5173\u952e\u8bcd</span>
-            <input class='form-control' name='search_keyword' placeholder='\u4f8b\u5982\uff1a\u6e38\u620f' />
-          </label>
-        </div>
-      </section>
-      <section class='source-step-panel'>
-        <div class='source-step-head'>
-          <span class='source-step-index'>第 2 步</span>
-          <div>
-            <h3 class='source-step-title'>配置采集范围</h3>
-            <p class='source-step-desc'>设置来源分组、调度分组和最大抓取条数，方便后续按地区或时段运行。</p>
-          </div>
-        </div>
-        <div class='field-grid source-config-grid'>
-          <label class='field'>
-            <span class='label'>\u6765\u6e90\u5206\u7ec4</span>
-            <select class='form-control' name='source_group'>
-              <option value='domestic' selected>国内</option>
-              <option value='overseas'>国外</option>
-            </select>
-            <span class='field-help'>国内用于“立即采集国内”，国外用于“立即采集国外”。</span>
-          </label>
-          <label class='field'>
-            <span class='label'>调度分组</span>
-            <input class='form-control' name='schedule_group' placeholder='例如：morning；留空则不参与定时任务' />
-          </label>
-          {account_field}
-          <label class='field'>
-            <span class='label'>\u6700\u5927\u6761\u6570</span>
-            <input class='form-control' name='max_items' value='30' />
-          </label>
-        </div>
-      </section>
-      <p class='helper-note source-config-full'>只需要填写 URL、分组、关键词和条数，系统会自动推断最合适的采集策略。</p>
-      <div class='page-actions source-config-full source-actions-row'>{_button_submit(SAVE_SOURCE_LABEL)}</div>
-    </form>
-    """
-    content = (
-        render_page_header(
-            eyebrow='Source Setup',
-            title=NEW_SOURCE_TITLE,
-            subtitle='\u7528\u7b80\u5316\u8868\u5355\u5feb\u901f\u5f55\u5165\u4e00\u4e2a\u65b0\u7684\u70ed\u70b9\u5165\u53e3\uff0c\u9002\u5408\u8fd0\u8425\u540c\u5b66\u65e5\u5e38\u7ef4\u62a4\u3002',
-            actions=_button_link('\u8fd4\u56de\u6765\u6e90\u5217\u8868', '/sources'),
-        )
-        + render_panel(BASE_CONFIG_TITLE, form, extra_class='form-panel', actions="<span class='panel-header-note'>当前支持平台：Bilibili / X / YouTube</span>")
-    )
-    return render_page(title=NEW_SOURCE_TITLE, content=content, body_class='theme-dark')
+    return _render_new_source_page(session=session)
+
+
+@router.post('/sources/new')
+async def create_source_page(request: Request, session: Session = Depends(get_db_session)) -> Response:
+    form_data = parse_qs((await request.body()).decode('utf-8'))
+    values = {
+        'entry_url': form_data.get('entry_url', [''])[0],
+        'search_keyword': form_data.get('search_keyword', [''])[0],
+        'source_group': form_data.get('source_group', ['domestic'])[0],
+        'schedule_group': form_data.get('schedule_group', [''])[0],
+        'account_id': form_data.get('account_id', [''])[0],
+        'max_items': form_data.get('max_items', ['1'])[0],
+    }
+    try:
+        payload = _build_form_payload(form_data)
+    except HTTPException as exc:
+        error_message = _normalize_source_form_error(exc.detail)
+        html = _render_new_source_page(session=session, values=values, error=error_message)
+        return HTMLResponse(content=html, status_code=422)
+
+    SourceService(session).create_source(payload)
+    return RedirectResponse(url='/sources?source_saved=1', status_code=303)
 
 
 @router.get('/content-center', response_class=HTMLResponse)
@@ -1200,6 +1260,22 @@ def content_center_page(
     items = query_content_items(session, title=title, tag=tag)
     title_value = escape((title or "").strip(), quote=True)
     tag_value = escape((tag or "").strip(), quote=True)
+    api_query = urlencode([(key, value) for key, value in (("title", (title or "").strip()), ("tag", (tag or "").strip())) if value])
+    api_url = f"/api/content?{api_query}" if api_query else "/api/content"
+    api_payload = [
+        {
+            "id": str(item.id),
+            "dedupe_key": str(item.dedupe_key),
+            "title": str(item.title),
+            "canonical_url": str(item.canonical_url or ""),
+            "excerpt": item.excerpt,
+            "tags": list(item.tags or []),
+            "updated_at": item.updated_at.isoformat() if item.updated_at else None,
+        }
+        for item in items
+    ]
+    api_preview_json = escape(json.dumps(api_payload, ensure_ascii=False, indent=2))
+    api_url_html = escape(api_url, quote=True)
     filter_form = f"""
     <form method='get' action='/content-center' class='scheduler-form scheduler-settings-panel'>
       <div class='field-grid source-config-grid'>
@@ -1215,10 +1291,81 @@ def content_center_page(
       <div class='page-actions source-actions-row'>{_button_submit('筛选', 'button-primary')}{_button_link('重置', '/content-center')}</div>
     </form>
     """
+    api_preview_actions = f"""
+    <div class='page-actions source-actions-row content-api-actions'>
+      <button class='button-secondary' type='button' id='content-api-preview-toggle' aria-expanded='false' aria-controls='content-api-preview'>预览 API 返回</button>
+      <button class='button-secondary' type='button' id='content-api-copy' data-api-url='{api_url_html}'>复制接口地址</button>
+    </div>
+    <div class='toast-stack' id='content-api-toast' hidden aria-live='polite' aria-atomic='true'>
+      <div class='toast toast-success' id='content-api-toast-message'></div>
+    </div>
+    <section class='content-api-preview-panel' id='content-api-preview' hidden>
+      <div class='content-api-preview-head'>
+        <div>
+          <h3 class='content-api-preview-title'>API 返回预览</h3>
+          <p class='helper-note'>当前筛选条件会同步到接口地址与预览结果里，不再跳到裸 JSON 页面。</p>
+        </div>
+        <code class='content-api-endpoint'>{escape(api_url)}</code>
+      </div>
+      <pre class='report-preview'>{api_preview_json}</pre>
+    </section>
+    <script>
+    (() => {{
+      const preview = document.getElementById('content-api-preview');
+      const toggle = document.getElementById('content-api-preview-toggle');
+      const copyButton = document.getElementById('content-api-copy');
+      const toastHost = document.getElementById('content-api-toast');
+      const toastMessage = document.getElementById('content-api-toast-message');
+      let toastTimer = null;
+
+      const showToast = (message) => {{
+        if (!toastHost || !toastMessage) return;
+        toastMessage.textContent = message;
+        toastHost.hidden = false;
+        window.clearTimeout(toastTimer);
+        toastTimer = window.setTimeout(() => {{
+          toastHost.hidden = true;
+        }}, 2600);
+      }};
+
+      toggle?.addEventListener('click', () => {{
+        if (!preview) return;
+        const willOpen = preview.hidden;
+        preview.hidden = !willOpen;
+        toggle.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+        toggle.textContent = willOpen ? '收起 API 预览' : '预览 API 返回';
+      }});
+
+      copyButton?.addEventListener('click', async () => {{
+        const rawUrl = copyButton.dataset.apiUrl || '/api/content';
+        const absoluteUrl = new URL(rawUrl, window.location.origin).toString();
+        try {{
+          if (navigator.clipboard?.writeText) {{
+            await navigator.clipboard.writeText(absoluteUrl);
+          }} else {{
+            const tempInput = document.createElement('textarea');
+            tempInput.value = absoluteUrl;
+            tempInput.setAttribute('readonly', 'readonly');
+            tempInput.style.position = 'absolute';
+            tempInput.style.left = '-9999px';
+            document.body.appendChild(tempInput);
+            tempInput.select();
+            document.execCommand('copy');
+            document.body.removeChild(tempInput);
+          }}
+          showToast('接口地址已复制');
+        }} catch (_error) {{
+          showToast('复制失败，请手动复制接口地址');
+        }}
+      }});
+    }})();
+    </script>
+    """
     if not items:
         panel_body = (
             filter_form
-            + "<div class='empty-state'>暂无内容资产，先执行一次采集即可在这里查看归一化结果。</div><div class='helper-note'>API: <code>/api/content</code></div>"
+            + api_preview_actions
+            + "<div class='empty-state'>暂无内容资产，先执行一次采集即可在这里查看归一化结果。</div>"
         )
     else:
         rows = "".join(
@@ -1233,8 +1380,8 @@ def content_center_page(
         )
         panel_body = (
             filter_form
-            + "<div class='helper-note'>API: <code>/api/content</code></div>"
-            "<div class='data-table-wrapper'>"
+            + api_preview_actions
+            + "<div class='data-table-wrapper'>"
             "<table class='data-table'><thead><tr><th>标题</th><th>链接</th><th>标签</th></tr></thead>"
             f"<tbody>{rows}</tbody></table></div>"
         )
@@ -1243,7 +1390,7 @@ def content_center_page(
             eyebrow='Content',
             title=CONTENT_CENTER_TITLE,
             subtitle='展示归一化、去重后的共享内容对象。',
-            actions=_button_link('返回首页', '/') + _button_link('内容 API', '/api/content'),
+            actions=_button_link('返回首页', '/'),
         )
         + render_panel(CONTENT_CENTER_TITLE, panel_body, extra_class='reports-overview-panel')
     )

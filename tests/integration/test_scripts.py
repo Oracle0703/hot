@@ -108,6 +108,65 @@ def test_build_desktop_shell_script_renders_electron_assembly_steps() -> None:
     assert "tray.png" in result.stdout
 
 
+def test_build_desktop_shell_repairs_incomplete_electron_runtime() -> None:
+    source_root = ROOT / "tmp_test_build_desktop_shell_source"
+    output_root = ROOT / "tmp_test_build_desktop_shell_out"
+    try:
+        for path in (source_root, output_root):
+            if path.exists():
+                subprocess.run(["powershell", "-Command", f"Remove-Item -Recurse -Force '{path}'"], check=False)
+
+        (source_root / "assets").mkdir(parents=True, exist_ok=True)
+        (source_root / "node_modules" / "electron" / "dist").mkdir(parents=True, exist_ok=True)
+
+        (source_root / "package.json").write_text(
+            json.dumps(
+                {
+                    "name": "desktop-shell-test-fixture",
+                    "version": "0.0.1",
+                    "private": True,
+                }
+            ),
+            encoding="utf-8",
+        )
+        (source_root / "main.js").write_text("console.log('desktop shell');\n", encoding="utf-8")
+        (source_root / "shell-state.js").write_text("module.exports = {};\n", encoding="utf-8")
+        (source_root / "assets" / "tray.png").write_bytes(b"stub")
+        (source_root / "node_modules" / "electron" / "dist" / "version").write_text("33.4.11", encoding="utf-8")
+        (source_root / "node_modules" / "electron" / "install.js").write_text(
+            """
+const fs = require("fs");
+const path = require("path");
+
+const root = __dirname;
+const dist = path.join(root, "dist");
+fs.mkdirSync(dist, { recursive: true });
+fs.writeFileSync(path.join(dist, "electron.exe"), "stub");
+fs.writeFileSync(path.join(root, "path.txt"), "electron.exe");
+fs.writeFileSync(path.join(root, "install-ran.txt"), "yes");
+""".strip()
+            + "\n",
+            encoding="utf-8",
+        )
+
+        result = run_ps1(
+            BUILD_DESKTOP_SHELL,
+            "-SourceRoot",
+            str(source_root.relative_to(ROOT)),
+            "-OutputRoot",
+            str(output_root.relative_to(ROOT)),
+        )
+
+        assert result.returncode == 0, result.stderr or result.stdout
+        assert (source_root / "node_modules" / "electron" / "install-ran.txt").exists()
+        assert (source_root / "node_modules" / "electron" / "path.txt").read_text(encoding="utf-8") == "electron.exe"
+        assert (output_root / "runtime" / "electron.exe").exists()
+    finally:
+        for path in (source_root, output_root):
+            if path.exists():
+                subprocess.run(["powershell", "-Command", f"Remove-Item -Recurse -Force '{path}'"], check=False)
+
+
 def test_desktop_shell_state_helpers_pass_node_tests() -> None:
     result = subprocess.run(
         ["node", "--test", str(ROOT / "desktop-shell" / "electron" / "shell-state.test.js")],

@@ -426,6 +426,24 @@ def test_create_source_from_form_infers_youtube_defaults_from_url(tmp_path) -> N
     assert data[0]["source_group"] == "overseas"
 
 
+def test_create_source_from_form_defaults_max_items_to_one(tmp_path) -> None:
+    client = create_test_client(make_sqlite_url(tmp_path, "create-form-default-max-items.db"))
+
+    response = client.post(
+        "/api/sources/form",
+        data={
+            "entry_url": "https://www.youtube.com/@ElectronicArts",
+            "source_group": "overseas",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    data = client.get("/api/sources").json()
+    assert len(data) == 1
+    assert data[0]["max_items"] == 1
+
+
 def test_create_source_from_form_requires_keyword_for_bilibili_site_search(tmp_path) -> None:
     client = create_test_client(make_sqlite_url(tmp_path, "create-form-bilibili-keyword.db"))
 
